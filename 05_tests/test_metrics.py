@@ -45,6 +45,17 @@ class MetricsTests(unittest.TestCase):
                 "covariance_caution_duration_s": [0.0, 0.0, 0.2, 1.2, 0.0],
                 "covariance_unhealthy_duration_s": [0.0, 0.0, 0.0, 0.6, 0.0],
                 "mode_transition_pending": [False, False, True, False, False],
+                "predict_skipped": [False, False, True, False, False],
+                "predict_warning": [False, False, True, True, False],
+                "dt_raw_s": [0.02, 0.02, 0.5, 0.02, 0.02],
+                "dt_applied_s": [0.02, 0.02, 0.0, 0.02, 0.02],
+                "predict_reason": [
+                    "applied",
+                    "applied",
+                    "above_max_dt_skipped",
+                    "applied",
+                    "applied",
+                ],
             }
         )
 
@@ -77,6 +88,12 @@ class MetricsTests(unittest.TestCase):
         self.assertAlmostEqual(metrics["max_covariance_unhealthy_duration_s"], 0.6, places=9)
         self.assertEqual(metrics["pending_row_count"], 1.0)
         self.assertAlmostEqual(metrics["pending_duration_s"], 1.0, places=9)
+        self.assertEqual(metrics["predict_skipped_count"], 1.0)
+        self.assertEqual(metrics["predict_warning_count"], 2.0)
+        self.assertAlmostEqual(metrics["max_dt_raw_s"], 0.5, places=9)
+        self.assertAlmostEqual(metrics["max_dt_applied_s"], 0.02, places=9)
+        self.assertAlmostEqual(metrics["predict_reason_duration_applied_s"], 4.0, places=9)
+        self.assertAlmostEqual(metrics["predict_reason_duration_above_max_dt_skipped_s"], 1.0, places=9)
 
 
 if __name__ == "__main__":

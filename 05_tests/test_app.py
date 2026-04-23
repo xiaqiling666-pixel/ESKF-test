@@ -12,6 +12,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from eskf_stack.adapters.csv_dataset import SensorFrame, diagnostic_truth_view, observation_view
+from eskf_stack.core import ImuInitializationSample
 from eskf_stack.app import _bootstrap_initialize_from_position_pair, _initialize_filter
 from eskf_stack.config import load_config
 from eskf_stack.core import OfflineESKF
@@ -57,7 +58,7 @@ class AppInitializationTests(unittest.TestCase):
             truth_yaw=None,
         )
 
-        initialized = _initialize_filter(filter_engine, frame)
+        initialized = _initialize_filter(filter_engine, frame, [], {})
 
         self.assertFalse(initialized)
         self.assertFalse(filter_engine.initialized)
@@ -90,7 +91,17 @@ class AppInitializationTests(unittest.TestCase):
             truth_yaw=None,
         )
 
-        initialized = _bootstrap_initialize_from_position_pair(filter_engine, anchor_frame, frame)
+        initialization_samples = [
+            ImuInitializationSample(time=0.0, accel=np.array([0.0, 0.0, 9.81]), gyro=np.zeros(3)),
+            ImuInitializationSample(time=0.2, accel=np.array([0.0, 0.0, 9.81]), gyro=np.zeros(3)),
+        ]
+        initialized = _bootstrap_initialize_from_position_pair(
+            filter_engine,
+            anchor_frame,
+            frame,
+            initialization_samples,
+            {},
+        )
 
         self.assertTrue(initialized)
         self.assertTrue(filter_engine.initialized)

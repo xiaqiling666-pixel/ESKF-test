@@ -71,6 +71,28 @@ def yaw_to_quat(yaw: float) -> np.ndarray:
     return np.array([np.cos(half), 0.0, 0.0, np.sin(half)])
 
 
+def euler_to_quat(roll: float, pitch: float, yaw: float) -> np.ndarray:
+    half_roll = 0.5 * roll
+    half_pitch = 0.5 * pitch
+    half_yaw = 0.5 * yaw
+    cr = np.cos(half_roll)
+    sr = np.sin(half_roll)
+    cp = np.cos(half_pitch)
+    sp = np.sin(half_pitch)
+    cy = np.cos(half_yaw)
+    sy = np.sin(half_yaw)
+    return quat_normalize(
+        np.array(
+            [
+                cr * cp * cy + sr * sp * sy,
+                sr * cp * cy - cr * sp * sy,
+                cr * sp * cy + sr * cp * sy,
+                cr * cp * sy - sr * sp * cy,
+            ]
+        )
+    )
+
+
 def quat_to_euler(quat: np.ndarray) -> tuple[float, float, float]:
     w, x, y, z = quat_normalize(quat)
     sinr_cosp = 2.0 * (w * x + y * z)
@@ -87,4 +109,3 @@ def quat_to_euler(quat: np.ndarray) -> tuple[float, float, float]:
     cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
     yaw = np.arctan2(siny_cosp, cosy_cosp)
     return roll, pitch, yaw
-

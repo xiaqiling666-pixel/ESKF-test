@@ -1,0 +1,13 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual env
+.venv/
+
+# IDE
+.idea/
+
+# Generated results
+03_results/
+03_results_*/

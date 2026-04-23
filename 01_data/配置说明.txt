@@ -39,6 +39,55 @@
    `experiment`
 3. 如果角色声明不对，加载配置时会直接报错
 
+当前新增的初始化配置
+`initialization`
+
+用途
+- 控制静止粗对准是否开启
+- 控制静止窗口时长和最小样本数
+- 控制多大波动还算“静止”
+
+当前字段
+- `static_coarse_alignment_enabled`
+- `static_window_duration_s`
+- `static_window_min_samples`
+- `static_max_accel_std_mps2`
+- `static_max_gyro_std_radps`
+- `static_gravity_norm_tolerance_mps2`
+
+说明
+- 这组配置主要影响：
+  起飞前静止段
+  roll/pitch 初值
+  gyro bias 初值
+  accel bias 粗初值
+- 纯静止段下，横向 `accel bias`
+  只能做粗估，
+  不要把它当成完整标定结果。
+
+当前新增的时间步长防护配置
+`time_step_management`
+
+用途
+- 约束滤波传播允许使用的 `dt`
+- 防止日志时间戳异常直接把传播炸坏
+- 为后面真实日志接入提供统一 `dt` 策略
+
+当前字段
+- `min_positive_dt_s`
+- `max_dt_s`
+- `skip_large_dt`
+
+说明
+- `dt <= 0`
+  当前直接跳过传播
+- `dt` 小于最小正步长
+  当前记为异常并跳过
+- `dt` 大于最大步长
+  当前默认跳过
+  如果后面把 `skip_large_dt = false`
+  则改为截断到 `max_dt_s`
+
 后面建议
 1. 通用配置继续保留在 `01_data` 根目录
 2. 样例验证配置可以继续按数据编号逐步增加

@@ -31,7 +31,7 @@ from .analysis.quality import (
 )
 from .analysis.state_machine import ModeStateTracker, determine_mode
 from .config import load_config, project_path
-from .core import OfflineESKF
+from .core import ImuInitializationSample, OfflineESKF, StaticCoarseInitializer
 from .core.math_utils import ensure_dir, quat_to_euler
 from .core.state import ERROR_STATE
 from .measurements import (
@@ -39,6 +39,7 @@ from .measurements import (
     GnssPositionMeasurement,
     GnssVelocityMeasurement,
     MagYawMeasurement,
+    MeasurementManager,
 )
 
 
@@ -65,12 +66,105 @@ def _resolve_initial_yaw(frame) -> float:
     return 0.0
 
 
-def _initialize_filter(filter_engine: OfflineESKF, frame) -> bool:
+def _preinit_sample_from_frame(frame) -> ImuInitializationSample:
+    return ImuInitializationSample(time=float(frame.time), accel=frame.accel.copy(), gyro=frame.gyro.copy())
+
+
+def _try_static_coarse_alignment(
+    filter_engine: OfflineESKF,
+    initialization_samples: list[ImuInitializationSample],
+    alignment_position: np.ndarray,
+    yaw: float,
+):
+    initializer = StaticCoarseInitializer(filter_engine.config.initialization)
+    return initializer.estimate(
+        initialization_samples,
+        position=alignment_position,
+        base_environment=filter_engine.navigation_environment,
+        use_wgs84_gravity=filter_engine.config.navigation_environment.use_wgs84_gravity,
+        use_earth_rotation=filter_engine.config.navigation_environment.use_earth_rotation,
+        yaw=yaw,
+    )
+
+
+def _initialize_filter_state(
+    filter_engine: OfflineESKF,
+    position: np.ndarray,
+    velocity: np.ndarray,
+    yaw: float,
+    initialization_samples: list[ImuInitializationSample],
+    alignment_position: np.ndarray | None,
+    initialization_summary: dict[str, Any],
+    mode: str,
+) -> None:
+    static_alignment = None
+    if alignment_position is not None:
+        static_alignment = _try_static_coarse_alignment(
+            filter_engine,
+            initialization_samples,
+            alignment_position,
+            yaw,
+        )
+
+    if static_alignment is None:
+        filter_engine.initialize(position, velocity, yaw)
+        initialization_summary.update(
+            {
+                "initialization_mode": mode,
+                "static_coarse_alignment_used": "false",
+            }
+        )
+        return
+
+    filter_engine.initialize(
+        position,
+        velocity,
+        yaw,
+        roll=static_alignment.roll,
+        pitch=static_alignment.pitch,
+        gyro_bias=static_alignment.gyro_bias,
+        accel_bias=static_alignment.accel_bias,
+    )
+    initialization_summary.update(
+        {
+            "initialization_mode": f"{mode}_static_coarse_alignment",
+            "static_coarse_alignment_used": "true",
+            "static_sample_count": str(static_alignment.sample_count),
+            "static_duration_s": f"{static_alignment.duration_s:.6f}",
+            "static_roll_deg": f"{np.rad2deg(static_alignment.roll):.6f}",
+            "static_pitch_deg": f"{np.rad2deg(static_alignment.pitch):.6f}",
+            "static_gyro_bias_x": f"{static_alignment.gyro_bias[0]:.9f}",
+            "static_gyro_bias_y": f"{static_alignment.gyro_bias[1]:.9f}",
+            "static_gyro_bias_z": f"{static_alignment.gyro_bias[2]:.9f}",
+            "static_accel_bias_x": f"{static_alignment.accel_bias[0]:.9f}",
+            "static_accel_bias_y": f"{static_alignment.accel_bias[1]:.9f}",
+            "static_accel_bias_z": f"{static_alignment.accel_bias[2]:.9f}",
+            "static_accel_std_norm": f"{static_alignment.accel_std_norm:.9f}",
+            "static_gyro_std_norm": f"{static_alignment.gyro_std_norm:.9f}",
+        }
+    )
+
+
+def _initialize_filter(
+    filter_engine: OfflineESKF,
+    frame,
+    initialization_samples: list[ImuInitializationSample],
+    initialization_summary: dict[str, Any],
+) -> bool:
     if frame.gnss_pos is None:
         return False
     if frame.gnss_vel is None and frame.mag_yaw is None:
         return False
-    filter_engine.initialize(frame.gnss_pos, _resolve_initial_velocity(frame), _resolve_initial_yaw(frame))
+    _initialize_filter_state(
+        filter_engine,
+        position=frame.gnss_pos,
+        velocity=_resolve_initial_velocity(frame),
+        yaw=_resolve_initial_yaw(frame),
+        initialization_samples=initialization_samples,
+        alignment_position=frame.gnss_pos,
+        initialization_summary=initialization_summary,
+        mode="direct",
+    )
     return True
 
 
@@ -78,6 +172,8 @@ def _bootstrap_initialize_from_position_pair(
     filter_engine: OfflineESKF,
     anchor_frame,
     frame,
+    initialization_samples: list[ImuInitializationSample],
+    initialization_summary: dict[str, Any],
     min_dt_s: float = 0.15,
     min_horizontal_displacement_m: float = 0.5,
 ) -> bool:
@@ -95,7 +191,17 @@ def _bootstrap_initialize_from_position_pair(
 
     velocity = displacement / dt
     yaw = frame.mag_yaw if frame.mag_yaw is not None else float(np.arctan2(velocity[1], velocity[0]))
-    filter_engine.initialize(frame.gnss_pos, velocity, yaw)
+    alignment_position = anchor_frame.gnss_pos if anchor_frame.gnss_pos is not None else frame.gnss_pos
+    _initialize_filter_state(
+        filter_engine,
+        position=frame.gnss_pos,
+        velocity=velocity,
+        yaw=yaw,
+        initialization_samples=initialization_samples,
+        alignment_position=alignment_position,
+        initialization_summary=initialization_summary,
+        mode="bootstrap_position_pair",
+    )
     return True
 
 
@@ -116,6 +222,7 @@ def _save_dataset_source_summary(
     config,
     source_summary: dict[str, str] | None,
     navigation_reference_override,
+    initialization_summary: dict[str, str] | None,
 ) -> None:
     lines = [
         "Dataset Source Summary",
@@ -131,6 +238,10 @@ def _save_dataset_source_summary(
             lines.append(f"{key}: {value}")
     else:
         lines.append("adapter_kind: unknown")
+    if initialization_summary:
+        lines.extend(["", "initialization_summary:"])
+        for key, value in initialization_summary.items():
+            lines.append(f"{key}: {value}")
     if navigation_reference_override is not None:
         lines.extend(
             [
@@ -163,19 +274,32 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
         config.navigation_environment.reference_height_m = dataset_load_result.navigation_reference_override.reference_height_m
     measurement_models = _build_measurements(config)
     filter_engine = OfflineESKF(config)
+    measurement_manager = MeasurementManager()
     freshness_tracker = SensorFreshnessTracker()
     covariance_tracker = CovarianceHealthTracker()
     mode_tracker = ModeStateTracker()
     bootstrap_anchor_frame = None
+    initialization_samples: list[ImuInitializationSample] = []
+    initialization_summary: dict[str, str] = {
+        "initialization_mode": "uninitialized",
+        "static_coarse_alignment_used": "false",
+    }
     last_time: float | None = None
     records: list[dict[str, Any]] = []
 
     for _, row in sensor_df.iterrows():
         frame = row_to_frame(row)
+        if not filter_engine.initialized:
+            initialization_samples.append(_preinit_sample_from_frame(frame))
         measurement_frame = observation_view(frame)
         truth_frame = diagnostic_truth_view(frame)
         if not filter_engine.initialized:
-            if not _initialize_filter(filter_engine, measurement_frame):
+            if not _initialize_filter(
+                filter_engine,
+                measurement_frame,
+                initialization_samples,
+                initialization_summary,
+            ):
                 if measurement_frame.gnss_pos is not None:
                     if bootstrap_anchor_frame is None:
                         bootstrap_anchor_frame = measurement_frame
@@ -183,6 +307,8 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
                         filter_engine,
                         bootstrap_anchor_frame,
                         measurement_frame,
+                        initialization_samples,
+                        initialization_summary,
                     ):
                         last_time = frame.time
                     else:
@@ -195,6 +321,7 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
 
         dt = 0.0 if last_time is None else max(0.0, frame.time - last_time)
         filter_engine.predict(frame.accel, frame.gyro, dt)
+        predict_diag = filter_engine.last_predict_diagnostics
 
         innovations = {"gnss_pos": 0.0, "gnss_vel": 0.0, "baro": 0.0, "mag": 0.0}
         available_flags = {"gnss_pos": False, "gnss_vel": False, "baro": False, "mag": False}
@@ -202,15 +329,19 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
         nis_values = {"gnss_pos": np.nan, "gnss_vel": np.nan, "baro": np.nan, "mag": np.nan}
         rejected_flags = {"gnss_pos": False, "gnss_vel": False, "baro": False, "mag": False}
         adaptation_scales = {"gnss_pos": 1.0, "gnss_vel": 1.0, "baro": 1.0, "mag": 1.0}
+        recovery_scales = {"gnss_pos": 1.0, "gnss_vel": 1.0, "baro": 1.0, "mag": 1.0}
+        management_modes = {"gnss_pos": "skip", "gnss_vel": "skip", "baro": "skip", "mag": "skip"}
 
         for model in measurement_models:
-            result = model.apply(filter_engine, measurement_frame)
+            result = measurement_manager.process(filter_engine, model, measurement_frame)
             available_flags[result.name] = result.available
             used_flags[result.name] = result.used
             innovations[result.name] = result.innovation_value
             nis_values[result.name] = np.nan if result.nis is None else result.nis
             rejected_flags[result.name] = result.rejected
-            adaptation_scales[result.name] = result.adaptation_scale
+            adaptation_scales[result.name] = result.applied_r_scale
+            recovery_scales[result.name] = result.recovery_scale
+            management_modes[result.name] = result.management_mode
             freshness_tracker.note_result(
                 result.name,
                 measurement_frame.time,
@@ -252,6 +383,11 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
 
         record = {
             "time": frame.time,
+            "dt_raw_s": predict_diag.raw_dt,
+            "dt_applied_s": predict_diag.applied_dt,
+            "predict_skipped": predict_diag.skipped,
+            "predict_warning": predict_diag.warning,
+            "predict_reason": predict_diag.reason,
             "est_x": filter_engine.state.position[0],
             "est_y": filter_engine.state.position[1],
             "est_z": filter_engine.state.position[2],
@@ -313,10 +449,18 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
             "gnss_vel_rejected": rejected_flags["gnss_vel"],
             "baro_rejected": rejected_flags["baro"],
             "mag_rejected": rejected_flags["mag"],
+            "gnss_pos_management_mode": management_modes["gnss_pos"],
+            "gnss_vel_management_mode": management_modes["gnss_vel"],
+            "baro_management_mode": management_modes["baro"],
+            "mag_management_mode": management_modes["mag"],
             "gnss_pos_r_scale": adaptation_scales["gnss_pos"],
             "gnss_vel_r_scale": adaptation_scales["gnss_vel"],
             "baro_r_scale": adaptation_scales["baro"],
             "mag_r_scale": adaptation_scales["mag"],
+            "gnss_pos_recovery_scale": recovery_scales["gnss_pos"],
+            "gnss_vel_recovery_scale": recovery_scales["gnss_vel"],
+            "baro_recovery_scale": recovery_scales["baro"],
+            "mag_recovery_scale": recovery_scales["mag"],
             "pos_sigma_norm_m": pos_sigma_norm_m,
             "vel_sigma_norm_mps": vel_sigma_norm_mps,
             "att_sigma_norm_deg": att_sigma_norm_deg,
@@ -354,6 +498,7 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
         config,
         dataset_load_result.source_summary,
         dataset_load_result.navigation_reference_override,
+        initialization_summary,
     )
 
     save_trajectory_plot(result_df, figure_dir / "trajectory.png")

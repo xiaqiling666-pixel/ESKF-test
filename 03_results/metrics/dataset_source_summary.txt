@@ -1,9 +1,0 @@
-Dataset Source Summary
-
-config_path: C:\Users\xzh\Desktop\ESKF离线融合项目\01_data\config.json
-config_profile: default_general
-config_name: 项目通用默认配置
-config_purpose: 原型框架默认入口，不绑定某一组样例数据。
-
-adapter_kind: standard_csv
-filter_input_dataset: 01_data/generated/demo_sensor_log.csv

@@ -99,6 +99,16 @@ def compute_metrics(result_df: pd.DataFrame) -> dict[str, float]:
         metrics["final_att_sigma_norm_deg"] = float(result_df["att_sigma_norm_deg"].iloc[-1])
     if "cov_min_diag" in result_df.columns:
         metrics["min_cov_diag"] = float(result_df["cov_min_diag"].min())
+    if "predict_skipped" in result_df.columns:
+        metrics["predict_skipped_count"] = float(result_df["predict_skipped"].astype(bool).sum())
+    if "predict_warning" in result_df.columns:
+        metrics["predict_warning_count"] = float(result_df["predict_warning"].astype(bool).sum())
+    if "dt_raw_s" in result_df.columns:
+        metrics["max_dt_raw_s"] = float(result_df["dt_raw_s"].max())
+    if "dt_applied_s" in result_df.columns:
+        metrics["max_dt_applied_s"] = float(result_df["dt_applied_s"].max())
+    if "predict_reason" in result_df.columns:
+        _add_categorical_duration_metrics(metrics, result_df, "predict_reason", "predict_reason")
     if "mode" in result_df.columns:
         _add_categorical_duration_metrics(metrics, result_df, "mode", "mode")
     if "mode_reason" in result_df.columns:

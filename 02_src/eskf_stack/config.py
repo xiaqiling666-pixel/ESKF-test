@@ -41,6 +41,23 @@ class InitialCovariance:
 
 
 @dataclass
+class InitializationConfig:
+    static_coarse_alignment_enabled: bool
+    static_window_duration_s: float
+    static_window_min_samples: int
+    static_max_accel_std_mps2: float
+    static_max_gyro_std_radps: float
+    static_gravity_norm_tolerance_mps2: float
+
+
+@dataclass
+class TimeStepManagementConfig:
+    min_positive_dt_s: float
+    max_dt_s: float
+    skip_large_dt: bool
+
+
+@dataclass
 class InnovationManagement:
     gnss_pos_nis_adapt_threshold: float
     gnss_pos_nis_reject_threshold: float
@@ -82,6 +99,8 @@ class AppConfig:
     process_noise: ProcessNoise
     measurement_noise: MeasurementNoise
     initial_covariance: InitialCovariance
+    initialization: InitializationConfig
+    time_step_management: TimeStepManagementConfig
     innovation_management: InnovationManagement
     navigation_environment: NavigationEnvironmentConfig
     use_baro: bool
@@ -125,6 +144,29 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         process_noise=ProcessNoise(**payload["process_noise"]),
         measurement_noise=MeasurementNoise(**payload["measurement_noise"]),
         initial_covariance=InitialCovariance(**payload["initial_covariance"]),
+        initialization=InitializationConfig(
+            **payload.get(
+                "initialization",
+                {
+                    "static_coarse_alignment_enabled": True,
+                    "static_window_duration_s": 2.0,
+                    "static_window_min_samples": 50,
+                    "static_max_accel_std_mps2": 0.25,
+                    "static_max_gyro_std_radps": 0.03,
+                    "static_gravity_norm_tolerance_mps2": 1.5,
+                },
+            )
+        ),
+        time_step_management=TimeStepManagementConfig(
+            **payload.get(
+                "time_step_management",
+                {
+                    "min_positive_dt_s": 1.0e-4,
+                    "max_dt_s": 0.2,
+                    "skip_large_dt": True,
+                },
+            )
+        ),
         innovation_management=InnovationManagement(**payload["innovation_management"]),
         navigation_environment=NavigationEnvironmentConfig(
             **payload.get(

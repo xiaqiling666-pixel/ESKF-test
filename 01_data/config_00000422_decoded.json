@@ -38,6 +38,19 @@
     "gyro_bias_std": 0.01,
     "accel_bias_std": 0.2
   },
+  "initialization": {
+    "static_coarse_alignment_enabled": true,
+    "static_window_duration_s": 2.0,
+    "static_window_min_samples": 50,
+    "static_max_accel_std_mps2": 0.25,
+    "static_max_gyro_std_radps": 0.03,
+    "static_gravity_norm_tolerance_mps2": 1.5
+  },
+  "time_step_management": {
+    "min_positive_dt_s": 0.0001,
+    "max_dt_s": 0.2,
+    "skip_large_dt": true
+  },
   "innovation_management": {
     "gnss_pos_nis_adapt_threshold": 7.815,
     "gnss_pos_nis_reject_threshold": 16.266,

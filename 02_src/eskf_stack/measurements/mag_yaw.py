@@ -4,7 +4,7 @@ import numpy as np
 
 from ..core.math_utils import quat_multiply, quat_normalize, quat_to_euler, rotvec_to_quat, wrap_angle
 from ..core.state import ERROR_STATE, ERROR_STATE_DIM
-from .base import MeasurementModel, MeasurementResult, innovation_covariance, mahalanobis_squared
+from .base import MeasurementModel, MeasurementUpdate
 
 
 def _yaw_error_jacobian(filter_engine) -> np.ndarray:
@@ -27,22 +27,18 @@ class MagYawMeasurement(MeasurementModel):
     def is_available(self, frame) -> bool:
         return frame.mag_yaw is not None
 
-    def apply(self, filter_engine, frame) -> MeasurementResult:
+    def build_update(self, filter_engine, frame) -> MeasurementUpdate | None:
         if frame.mag_yaw is None:
-            return MeasurementResult(name=self.name, available=False, used=False)
+            return None
 
         current_yaw = quat_to_euler(filter_engine.state.quaternion)[2]
         residual = np.array([wrap_angle(frame.mag_yaw - current_yaw)])
         H = np.zeros((1, ERROR_STATE_DIM))
         H[0, ERROR_STATE.attitude] = _yaw_error_jacobian(filter_engine)
         std = np.deg2rad(filter_engine.config.measurement_noise.yaw_std_deg)
-        R = np.array([[std**2]])
-        nis = mahalanobis_squared(residual, innovation_covariance(filter_engine, H, R))
-        filter_engine.apply_linear_update(residual, H, R)
-        return MeasurementResult(
-            name=self.name,
-            available=True,
-            used=True,
+        return MeasurementUpdate(
+            residual=residual,
+            H=H,
+            base_R=np.array([[std**2]]),
             innovation_value=float(abs(np.rad2deg(residual[0]))),
-            nis=nis,
         )

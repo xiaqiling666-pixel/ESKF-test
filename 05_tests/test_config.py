@@ -20,12 +20,16 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(config.config_metadata.profile, "default_general")
         self.assertEqual(Path(config.config_path).resolve(), DEFAULT_CONFIG_PATH.resolve())
+        self.assertTrue(config.initialization.static_coarse_alignment_enabled)
+        self.assertGreater(config.time_step_management.max_dt_s, config.time_step_management.min_positive_dt_s)
 
     def test_sample_config_uses_non_default_profile(self) -> None:
         config = load_config(PROJECT_ROOT / "01_data" / "config_00000422_decoded.json")
 
         self.assertEqual(config.config_metadata.profile, "sample_validation")
         self.assertNotEqual(Path(config.config_path).resolve(), DEFAULT_CONFIG_PATH.resolve())
+        self.assertGreater(config.initialization.static_window_min_samples, 0)
+        self.assertTrue(config.time_step_management.skip_large_dt)
 
     def test_non_default_config_cannot_claim_default_general_profile(self) -> None:
         payload = json.loads((PROJECT_ROOT / "01_data" / "config_00000422_decoded.json").read_text(encoding="utf-8"))

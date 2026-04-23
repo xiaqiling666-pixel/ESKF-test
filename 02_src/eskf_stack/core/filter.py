@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from ..config import AppConfig
 from .math_utils import (
+    euler_to_quat,
     quat_multiply,
     quat_normalize,
     rotvec_to_quat,
     skew,
-    yaw_to_quat,
 )
 from .mechanization import mechanize_local_frame
 from .navigation import (
@@ -17,6 +19,15 @@ from .navigation import (
     resolve_local_navigation_environment,
 )
 from .state import AXIS_DIM, ERROR_STATE, ERROR_STATE_DIM, PROCESS_NOISE, PROCESS_NOISE_DIM, NavState
+
+
+@dataclass(frozen=True)
+class PredictDiagnostics:
+    raw_dt: float
+    applied_dt: float
+    skipped: bool
+    warning: bool
+    reason: str
 
 
 class OfflineESKF:
@@ -29,6 +40,13 @@ class OfflineESKF:
         self.state = NavState.zero()
         self.P = self._build_initial_covariance()
         self.initialized = False
+        self.last_predict_diagnostics = PredictDiagnostics(
+            raw_dt=0.0,
+            applied_dt=0.0,
+            skipped=True,
+            warning=False,
+            reason="not_run",
+        )
 
     def _sync_navigation_environment(self) -> None:
         self.current_navigation_environment = resolve_local_navigation_environment(
@@ -50,12 +68,21 @@ class OfflineESKF:
         diagonal[ERROR_STATE.accel_bias] = init.accel_bias_std**2
         return np.diag(diagonal)
 
-    def initialize(self, position: np.ndarray, velocity: np.ndarray, yaw: float) -> None:
+    def initialize(
+        self,
+        position: np.ndarray,
+        velocity: np.ndarray,
+        yaw: float,
+        roll: float = 0.0,
+        pitch: float = 0.0,
+        gyro_bias: np.ndarray | None = None,
+        accel_bias: np.ndarray | None = None,
+    ) -> None:
         self.state.position = position.astype(float)
         self.state.velocity = velocity.astype(float)
-        self.state.quaternion = yaw_to_quat(float(yaw))
-        self.state.gyro_bias = np.zeros(AXIS_DIM)
-        self.state.accel_bias = np.zeros(AXIS_DIM)
+        self.state.quaternion = euler_to_quat(float(roll), float(pitch), float(yaw))
+        self.state.gyro_bias = np.zeros(AXIS_DIM) if gyro_bias is None else gyro_bias.astype(float)
+        self.state.accel_bias = np.zeros(AXIS_DIM) if accel_bias is None else accel_bias.astype(float)
         self.P = self._build_initial_covariance()
         self._sync_navigation_environment()
         self.initialized = True
@@ -104,7 +131,41 @@ class OfflineESKF:
         return phi, 0.5 * (qd + qd.T)
 
     def predict(self, accel_meas: np.ndarray, gyro_meas: np.ndarray, dt: float) -> None:
-        if dt <= 0.0:
+        time_step_config = self.config.time_step_management
+        raw_dt = float(dt)
+        applied_dt = raw_dt
+        skipped = False
+        warning = False
+        reason = "applied"
+
+        if raw_dt <= 0.0:
+            skipped = True
+            applied_dt = 0.0
+            reason = "nonpositive_dt"
+        elif raw_dt < time_step_config.min_positive_dt_s:
+            skipped = True
+            applied_dt = 0.0
+            warning = True
+            reason = "below_min_positive_dt"
+        elif raw_dt > time_step_config.max_dt_s:
+            warning = True
+            if time_step_config.skip_large_dt:
+                skipped = True
+                applied_dt = 0.0
+                reason = "above_max_dt_skipped"
+            else:
+                applied_dt = time_step_config.max_dt_s
+                reason = "above_max_dt_clamped"
+
+        self.last_predict_diagnostics = PredictDiagnostics(
+            raw_dt=raw_dt,
+            applied_dt=applied_dt,
+            skipped=skipped,
+            warning=warning,
+            reason=reason,
+        )
+
+        if skipped:
             self._sync_navigation_environment()
             self.current_coriolis_position_jacobian = np.zeros((AXIS_DIM, AXIS_DIM))
             self.current_coriolis_velocity_jacobian = np.zeros((AXIS_DIM, AXIS_DIM))
@@ -114,7 +175,7 @@ class OfflineESKF:
             self.state,
             accel_meas,
             gyro_meas,
-            dt,
+            applied_dt,
             self.navigation_environment,
             use_wgs84_gravity=self.config.navigation_environment.use_wgs84_gravity,
             use_earth_rotation=self.config.navigation_environment.use_earth_rotation,
@@ -142,7 +203,7 @@ class OfflineESKF:
             rot_mid,
         )
         G = self._build_noise_mapping(rot_mid)
-        phi, qd = self._discretize_error_model(F, G, dt)
+        phi, qd = self._discretize_error_model(F, G, applied_dt)
         self.P = phi @ self.P @ phi.T + qd
         self.P = 0.5 * (self.P + self.P.T)
         self._sync_navigation_environment()

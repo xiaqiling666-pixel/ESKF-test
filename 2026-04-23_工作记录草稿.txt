@@ -570,3 +570,252 @@ ESKF离线融合项目
 61. 当前这一步已验证
    - unittest: 34 项通过
    - main.py 已重新跑通
+
+62. 今日第十六步
+   - 把观测更新里的鲁棒逻辑从具体量测模块里抽出来
+   - 当前已新增：
+     measurement manager
+   - 当前 manager 统一负责：
+     NIS
+     门限拒绝
+     自适应 R
+     连续拒绝后的恢复阶段渐进重接入
+
+63. 本步具体修改文件
+   - 02_src\eskf_stack\measurements\base.py
+   - 02_src\eskf_stack\measurements\manager.py
+   - 02_src\eskf_stack\measurements\gnss_position.py
+   - 02_src\eskf_stack\measurements\gnss_velocity.py
+   - 02_src\eskf_stack\measurements\barometer.py
+   - 02_src\eskf_stack\measurements\mag_yaw.py
+   - 02_src\eskf_stack\measurements\__init__.py
+   - 02_src\eskf_stack\app.py
+   - 05_tests\test_measurements.py
+   - 00_说明\README_先看我.txt
+   - 00_说明\项目架构说明.txt
+   - 00_说明\后续扩展路线.txt
+
+64. 本步直接结果
+   - 各量测模块现在主要负责：
+     residual
+     H
+     base_R
+   - 鲁棒决策不再散在各个量测文件里
+   - 主流程结果里新增了：
+     management_mode
+     recovery_scale
+   - 后面如果做论文里的：
+     gating
+     adaptive R
+     recover
+     mode switch
+     更适合继续长在 manager 这一层
+
+65. 这一步为什么重要
+   - 这是把“量测模型”
+     和“鲁棒观测管理”
+     正式拆开
+   - 这样后面扩新传感器时
+     不用每个文件都自己重写一套拒绝和恢复逻辑
+   - 也更符合项目主线：
+     先把框架边界搭稳
+     再逐步补初始化和工程增强项
+
+66. 当前这一步已验证
+   - 新增 measurement manager 单元测试：
+     拒绝
+     自适应 R
+     渐进恢复
+   - 完整回归已通过：
+     unittest
+     main.py
+
+67. 今日第十七步
+   - 新增静止粗对准初始化模块
+   - 当前已新增：
+     静止窗口配置
+     roll/pitch 粗估
+     gyro bias 初估
+     accel bias 粗估
+   - 并把这层接回主流程初始化
+
+68. 本步具体修改文件
+   - 02_src\eskf_stack\config.py
+   - 01_data\config.json
+   - 01_data\config_00000422_decoded.json
+   - 02_src\eskf_stack\core\math_utils.py
+   - 02_src\eskf_stack\core\initialization.py
+   - 02_src\eskf_stack\core\filter.py
+   - 02_src\eskf_stack\core\__init__.py
+   - 02_src\eskf_stack\app.py
+   - 05_tests\test_initialization.py
+   - 05_tests\test_app.py
+   - 05_tests\test_config.py
+   - 00_说明\README_先看我.txt
+   - 00_说明\项目架构说明.txt
+   - 01_data\配置说明.txt
+
+69. 本步直接结果
+   - 初始化不再默认只有：
+     位置
+     速度
+     yaw
+     bias 全零
+   - 当前如果起始段满足静止窗口条件：
+     会先用 IMU 静止段估计 roll/pitch
+     会估计 gyro bias
+     会给 accel bias 一个粗初值
+   - 主流程运行后，
+     `dataset_source_summary.txt`
+     里也会写出这次是否用了静止粗对准初始化
+
+70. 这一步为什么重要
+   - 这一步补的是你当前最明显的短板之一：
+     初始化太弱
+   - 现在系统不必再默认：
+     roll = 0
+     pitch = 0
+     bias = 0
+   - 但也明确保留了工程边界：
+     纯静止段对横向 accel bias 不完全可观
+     所以这里只能叫粗估
+     不能假装已经做成完整标定
+
+71. 当前这一步已验证
+   - 新增初始化单元测试：
+     静止粗对准估计 roll/pitch
+     gyro bias 初估
+     filter.initialize 接收 roll/pitch/bias
+   - 全量 unittest：39 项通过
+   - main.py 已重新跑通
+
+72. 今日第十八步
+   - 补姿态方向一致性单元测试
+   - 当前已新增：
+     纯旋转传播测试
+     小角度误差注入方向测试
+
+73. 本步具体修改文件
+   - 05_tests\test_navigation_core.py
+   - 00_说明\README_先看我.txt
+   - 00_说明\项目架构说明.txt
+
+74. 本步直接结果
+   - 当前 `predict()` 在：
+     纯 z 轴角速度
+     静止比力补偿
+     无地球自转
+     的场景下
+     能按预期累积 yaw
+     且不会凭空产生平移
+   - 当前 `_inject_error_state()`
+     已明确验证为：
+     右乘误差注入
+     `q <- q ⊗ delta_q`
+   - 并且它和左乘结果可区分
+
+75. 这一步为什么重要
+   - 姿态方向约定最怕“代码能跑但符号不一致”
+   - 现在至少把最关键的两件事钉死了：
+     传播方向
+     注入方向
+   - 后面如果继续改 mechanization
+     或改 reset Jacobian
+     这些测试会第一时间报警
+
+76. 当前这一步已验证
+   - 姿态相关测试通过
+   - 完整回归已通过：
+     unittest
+     main.py
+
+77. 今日第十九步
+   - 给传播层加入 `dt` 防护
+   - 当前已新增：
+     `dt` 配置项
+     最小正步长检查
+     最大步长检查
+     大步长跳过或截断策略
+     传播诊断输出
+
+78. 本步具体修改文件
+   - 02_src\eskf_stack\config.py
+   - 01_data\config.json
+   - 01_data\config_00000422_decoded.json
+   - 02_src\eskf_stack\core\filter.py
+   - 02_src\eskf_stack\app.py
+   - 02_src\eskf_stack\analysis\evaluator.py
+   - 05_tests\test_config.py
+   - 05_tests\test_navigation_core.py
+   - 05_tests\test_metrics.py
+   - 01_data\配置说明.txt
+   - 00_说明\README_先看我.txt
+   - 00_说明\项目架构说明.txt
+
+79. 本步直接结果
+   - 传播不再默认“所有 dt 都照单全收”
+   - 当前会明确区分：
+     nonpositive_dt
+     below_min_positive_dt
+     above_max_dt_skipped
+     above_max_dt_clamped
+     applied
+   - 主流程结果当前可记录：
+     dt_raw_s
+     dt_applied_s
+     predict_skipped
+     predict_warning
+     predict_reason
+
+80. 这一步为什么重要
+   - 真实日志最常见的问题之一
+     不是公式推导
+     而是时间戳异常
+   - 这一步先把传播层做成“有边界、有诊断”的状态
+   - 还没上更重的 van Loan
+     但已经先把最容易炸系统的时间步长问题拦住
+
+81. 当前这一步已验证
+   - 针对性测试通过：
+     配置加载
+     纯旋转传播
+     dt 跳过
+     dt 截断
+     dt 指标统计
+   - 全量 unittest：44 项通过
+   - 这次未再主动跑主入口生成新结果文件
+
+82. 今日额外项目检查
+   - 已检查仓库跟踪文件和工作区污染来源
+   - 当前确认两个工程卫生问题：
+     仓库仍跟踪 `__pycache__ / .pyc`
+     仓库仍跟踪 `03_results`
+   - 这会导致：
+     运行测试后工作区容易变脏
+     运行主入口后结果文件容易被误认为源码改动
+
+83. 今日第二十步
+   - 开始做仓库卫生整治
+   - 当前已新增：
+     `.gitignore`
+   - 当前已明确忽略：
+     `__pycache__`
+     `*.pyc`
+     `.idea`
+     `03_results`
+     `03_results_*`
+
+84. 本步具体修改文件
+   - .gitignore
+   - 04_tools\运行核心检查.bat
+   - 04_tools\一键运行示例.bat
+   - 00_说明\README_先看我.txt
+
+85. 本步直接结果
+   - “跑测试”和“跑完整结果”现在在工具提示上被明确区分
+   - 日常开发路径：
+     `运行核心检查.bat`
+   - 需要看结果时再跑：
+     `一键运行示例.bat`
+   - 以后新生成的缓存和结果目录
+     不该再继续进入 Git 跟踪
