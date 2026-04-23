@@ -1,0 +1,57 @@
+{
+  "config_metadata": {
+    "profile": "sample_validation",
+    "name": "00000422 decoded 样例验证配置",
+    "purpose": "用于验证 decoded 飞控目录在当前原型框架上的输入语义和 adapter 设计。"
+  },
+  "dataset_path": "01_data/generated/demo_sensor_log.csv",
+  "dataset_adapter": {
+    "kind": "dx_decoded_flight_csv",
+    "options": {
+      "decoded_dir": "C:\\Users\\xzh\\Desktop\\DX\\05_data\\dx_data\\decoded\\00000422",
+      "reference_mode": "first_gps",
+      "normalize_time_to_zero": true,
+      "gps_alignment_tolerance_s": 0.12,
+      "truth_alignment_tolerance_s": 0.06,
+      "gps_velocity_mode": "none",
+      "imu_transform_mode": "ardupilot_frd_to_flu"
+    }
+  },
+  "results_dir": "03_results_00000422_decoded_recommended",
+  "gravity": [0.0, 0.0, -9.81],
+  "process_noise": {
+    "accel_std": 0.08,
+    "gyro_std": 0.01,
+    "gyro_bias_std": 0.0005,
+    "accel_bias_std": 0.005
+  },
+  "measurement_noise": {
+    "gnss_pos_std": 0.8,
+    "gnss_vel_std": 0.2,
+    "baro_std": 0.35,
+    "yaw_std_deg": 3.0
+  },
+  "initial_covariance": {
+    "pos_std": 1.5,
+    "vel_std": 0.8,
+    "att_std_deg": 12.0,
+    "gyro_bias_std": 0.01,
+    "accel_bias_std": 0.2
+  },
+  "innovation_management": {
+    "gnss_pos_nis_adapt_threshold": 7.815,
+    "gnss_pos_nis_reject_threshold": 16.266,
+    "gnss_vel_nis_adapt_threshold": 7.815,
+    "gnss_vel_nis_reject_threshold": 16.266
+  },
+  "navigation_environment": {
+    "frame": "ENU",
+    "reference_lat_deg": 22.3027,
+    "reference_lon_deg": 114.1772,
+    "reference_height_m": 0.0,
+    "use_wgs84_gravity": true,
+    "use_earth_rotation": true
+  },
+  "use_baro": false,
+  "use_mag": false
+}

@@ -1,0 +1,156 @@
+日期
+2026-04-21
+
+项目
+ESKF离线融合项目
+
+今日工作目标
+沿着“更接近 KF-GINS 的内核路线”继续小步推进，不跳步，不直接接真实日志，先把 core 的导航传播、误差传播、结果诊断和最小回归检查做扎实。
+
+一、今日完成的核心工作
+1. 继续推进了 core 的导航传播建模
+   - 在 core/navigation.py 中把局部 ENU 导航环境继续补强。
+   - 当前环境里已经稳定包含：
+     reference/current lat lon h
+     meridian radius / prime vertical radius
+     gravity vector
+     gravity gradient
+     earth rate
+     transport rate
+   - 继续把局部地理映射从“更粗的近似”修到“当前高度参与、纬度自洽迭代”的版本。
+
+2. 继续推进了误差传播模型
+   - 在 core/filter.py 中把速度误差对位置和速度的耦合继续补全。
+   - 已加入：
+     gravity 对位置的梯度项
+     coriolis 对速度的雅可比
+     coriolis 对位置的雅可比
+   - 这些量一开始有一部分是数值差分，后面已经逐步改成解析式/半解析式。
+   - 当前导数实现比今天前半段更稳定，也更快。
+
+3. 做了导航线性化的结构收口
+   - 在 core/navigation.py 中新增了 NavigationLinearization 结构。
+   - 把 gravity_gradient / coriolis_position_gradient / coriolis_velocity_gradient 统一从 navigation 层产出。
+   - core/filter.py 不再自己散着拼这些量，结构比之前干净。
+
+4. 升级了协方差离散化
+   - 把 Phi/Qd 从一阶近似推进到二阶近似。
+   - 这一改动只落在 core/filter.py，不影响 measurements 层接口。
+   - 改完后重新跑过主流程，数值正常，误差还有小幅改善。
+
+5. 补了误差注入后的 reset Jacobian
+   - 在量测更新后，姿态误差注入名义状态之后，协方差也按 reset Jacobian 做了变换。
+   - 这是更正规 ESKF 写法里该有的一步。
+   - 加完后重新核对了协方差对称性和主流程指标。
+
+6. 修了导航环境同步问题
+   - 修掉了“初始化/预测/量测更新后，current_navigation_environment 可能落后于 state”的问题。
+   - 现在首帧和量测更新后的 nav_height_m 会和当前状态对齐。
+   - 这类问题如果不修，后面看 diagnostics 很容易误判。
+
+二、今日完成的结果诊断增强
+1. 导航诊断输出增强
+   - fusion_output.csv 里现在除了原来的导航量，还会输出：
+     meridian_radius_m
+     prime_vertical_radius_m
+     gravity_gradient_norm
+     coriolis_position_gradient_norm
+     coriolis_velocity_gradient_norm
+   - navigation_diagnostics.png 也已经同步增强。
+
+2. 协方差诊断输出增强
+   - 新增了每一帧的：
+     pos_sigma_norm_m
+     vel_sigma_norm_mps
+     att_sigma_norm_deg
+     cov_trace
+     cov_min_diag
+   - 新增图：
+     covariance_diagnostics.png
+   - 这样后面判断“滤波是更稳了，还是只是误差碰巧变小”会更直接。
+
+3. 质量评分接入协方差健康度
+   - 在 analysis/quality.py 里把协方差健康度轻量接进了 quality score。
+   - 当前是保守接入：
+     正常情况下分数变化不大
+     只有 sigma 明显变差时才会被扣分
+   - 所以最新 mean_quality_score 比之前略低，这是预期内变化，不是系统退化。
+
+4. 增加运行时间统计
+   - metrics_summary.txt 里现在会写：
+     processed_rows
+     pipeline_runtime_s
+   - 这让后面每次继续改 core 时，能同时看精度和代价。
+
+三、今日完成的测试与工具
+1. 新增最小核心回归测试
+   - 新增文件：
+     05_tests\test_navigation_core.py
+   - 当前已覆盖的检查包括：
+     coriolis_velocity_jacobian 与数值差分一致
+     coriolis_position_jacobian 与数值差分一致
+     gravity_gradient 与数值差分一致
+     量测更新后导航环境同步
+     姿态误差注入后协方差仍保持对称和有限
+
+2. 新增核心检查脚本
+   - 新增文件：
+     04_tools\运行核心检查.bat
+   - 还顺手修了批处理脚本的换行/编码问题，避免 cmd 读取异常。
+
+3. 更新项目说明
+   - README_先看我.txt 已同步修正过时描述。
+   - 当前说明和代码状态基本一致，不会再把“地球自转默认关闭”这类旧信息写错。
+
+四、今日重点修改过的文件
+1. 02_src\eskf_stack\core\navigation.py
+2. 02_src\eskf_stack\core\filter.py
+3. 02_src\eskf_stack\core\mechanization.py
+4. 02_src\eskf_stack\analysis\plotter.py
+5. 02_src\eskf_stack\analysis\evaluator.py
+6. 02_src\eskf_stack\analysis\quality.py
+7. 02_src\eskf_stack\app.py
+8. 05_tests\test_navigation_core.py
+9. 04_tools\运行核心检查.bat
+10. 04_tools\一键运行示例.bat
+11. 00_说明\README_先看我.txt
+
+五、今日验证结果
+1. 主流程已多次重新运行
+   - 命令：
+     python 02_src\main.py
+   - 结果正常输出到：
+     03_results\figures
+     03_results\metrics
+
+2. 核心测试已通过
+   - 命令：
+     python -m unittest discover 05_tests
+   - 当前通过数量：
+     5 项
+
+3. 最新一轮关键指标
+   - position_rmse_m: 1.409304
+   - velocity_rmse_mps: 0.327819
+   - yaw_rmse_deg: 0.676386
+   - final_position_error_m: 0.459161
+   - mean_quality_score: 91.806310
+   - final_pos_sigma_norm_m: 0.262987
+   - final_vel_sigma_norm_mps: 0.172334
+   - final_att_sigma_norm_deg: 2.165078
+   - min_cov_diag: 0.000006
+   - pipeline_runtime_s: 18.279068
+
+说明
+pipeline_runtime_s 是单次运行测得，受当前机器状态影响会有波动。今天运行中也观察到了偶发抖动，但连续复跑后，当前量级已经稳定回到约 15 到 18 秒区间。
+
+六、今天结束时项目所处状态
+1. 这套项目已经明显不再是最初的教学 demo 结构。
+2. core 已经开始具备“局部 ENU 导航环境 + 更正规误差传播 + 基本回归检查”的形态。
+3. measurements 层接口没有被这轮修改破坏，后续继续加量测还接得上。
+4. 现在最需要避免的是继续无约束加公式，后续应继续在“可验证、可诊断、可回归”的前提下往前推。
+
+七、下一步建议
+1. 把协方差健康度继续接进 state_machine，而不是只影响 quality score。
+2. 继续清理当前位置相关导数里的近似项，逐步向更正规的导航误差模型推进。
+3. 在 core 稳住之后，再考虑 PX4 / ROS2 / Gazebo 真实日志适配层，不要反过来让数据接入倒逼 core 返工。

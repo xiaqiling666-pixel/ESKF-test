@@ -1,0 +1,181 @@
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+import numpy as np
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = PROJECT_ROOT / "02_src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+from eskf_stack.config import load_config
+from eskf_stack.core import OfflineESKF
+from eskf_stack.core.navigation import (
+    build_local_navigation_environment,
+    coriolis_position_jacobian,
+    coriolis_velocity_jacobian,
+    resolve_local_navigation_environment,
+)
+from eskf_stack.core.state import ERROR_STATE, ERROR_STATE_DIM
+
+
+class NavigationCoreTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+
+    def test_coriolis_velocity_jacobian_matches_numeric_difference(self) -> None:
+        base_environment = build_local_navigation_environment(self.config)
+        position_nav = np.array([120.0, 80.0, 15.0])
+        velocity_nav = np.array([2.0, 3.0, -0.2])
+        environment = resolve_local_navigation_environment(
+            base_environment,
+            position_nav,
+            velocity_nav,
+            use_wgs84_gravity=self.config.navigation_environment.use_wgs84_gravity,
+            use_earth_rotation=self.config.navigation_environment.use_earth_rotation,
+        )
+
+        analytic = coriolis_velocity_jacobian(environment, velocity_nav)
+
+        step = 1e-3
+        numeric = np.zeros((3, 3))
+        for axis in range(3):
+            delta = np.zeros(3)
+            delta[axis] = step
+            velocity_plus = velocity_nav + delta
+            velocity_minus = velocity_nav - delta
+            omega_plus = environment.earth_rate_nav + environment.earth_rate_nav
+            omega_plus += resolve_local_navigation_environment(
+                base_environment,
+                position_nav,
+                velocity_plus,
+                use_wgs84_gravity=self.config.navigation_environment.use_wgs84_gravity,
+                use_earth_rotation=self.config.navigation_environment.use_earth_rotation,
+            ).transport_rate_nav
+            omega_minus = environment.earth_rate_nav + environment.earth_rate_nav
+            omega_minus += resolve_local_navigation_environment(
+                base_environment,
+                position_nav,
+                velocity_minus,
+                use_wgs84_gravity=self.config.navigation_environment.use_wgs84_gravity,
+                use_earth_rotation=self.config.navigation_environment.use_earth_rotation,
+            ).transport_rate_nav
+            coriolis_plus = -np.cross(omega_plus, velocity_plus)
+            coriolis_minus = -np.cross(omega_minus, velocity_minus)
+            numeric[:, axis] = (coriolis_plus - coriolis_minus) / (2.0 * step)
+
+        self.assertTrue(np.allclose(analytic, numeric, rtol=1e-6, atol=1e-10))
+
+    def test_coriolis_position_jacobian_matches_numeric_difference(self) -> None:
+        base_environment = build_local_navigation_environment(self.config)
+        position_nav = np.array([120.0, 80.0, 15.0])
+        velocity_nav = np.array([2.0, 3.0, -0.2])
+
+        analytic = coriolis_position_jacobian(
+            base_environment,
+            position_nav,
+            velocity_nav,
+            use_wgs84_gravity=self.config.navigation_environment.use_wgs84_gravity,
+            use_earth_rotation=self.config.navigation_environment.use_earth_rotation,
+        )
+
+        step = 1.0
+        numeric = np.zeros((3, 3))
+        for axis in range(3):
+            delta = np.zeros(3)
+            delta[axis] = step
+            environment_plus = resolve_local_navigation_environment(
+                base_environment,
+                position_nav + delta,
+                velocity_nav,
+                use_wgs84_gravity=self.config.navigation_environment.use_wgs84_gravity,
+                use_earth_rotation=self.config.navigation_environment.use_earth_rotation,
+            )
+            environment_minus = resolve_local_navigation_environment(
+                base_environment,
+                position_nav - delta,
+                velocity_nav,
+                use_wgs84_gravity=self.config.navigation_environment.use_wgs84_gravity,
+                use_earth_rotation=self.config.navigation_environment.use_earth_rotation,
+            )
+            coriolis_plus = -np.cross(environment_plus.omega_coriolis_nav, velocity_nav)
+            coriolis_minus = -np.cross(environment_minus.omega_coriolis_nav, velocity_nav)
+            numeric[:, axis] = (coriolis_plus - coriolis_minus) / (2.0 * step)
+
+        self.assertTrue(np.allclose(analytic, numeric, rtol=1e-4, atol=1e-11))
+
+    def test_gravity_gradient_matches_numeric_difference(self) -> None:
+        base_environment = build_local_navigation_environment(self.config)
+        position_nav = np.array([120.0, 80.0, 15.0])
+        velocity_nav = np.array([2.0, 3.0, -0.2])
+        environment = resolve_local_navigation_environment(
+            base_environment,
+            position_nav,
+            velocity_nav,
+            use_wgs84_gravity=self.config.navigation_environment.use_wgs84_gravity,
+            use_earth_rotation=self.config.navigation_environment.use_earth_rotation,
+        )
+
+        analytic = environment.gravity_gradient_nav
+
+        step = 1.0
+        numeric = np.zeros((3, 3))
+        for axis in range(3):
+            delta = np.zeros(3)
+            delta[axis] = step
+            gravity_plus = resolve_local_navigation_environment(
+                base_environment,
+                position_nav + delta,
+                velocity_nav,
+                use_wgs84_gravity=self.config.navigation_environment.use_wgs84_gravity,
+                use_earth_rotation=self.config.navigation_environment.use_earth_rotation,
+            ).gravity_vector
+            gravity_minus = resolve_local_navigation_environment(
+                base_environment,
+                position_nav - delta,
+                velocity_nav,
+                use_wgs84_gravity=self.config.navigation_environment.use_wgs84_gravity,
+                use_earth_rotation=self.config.navigation_environment.use_earth_rotation,
+            ).gravity_vector
+            numeric[:, axis] = (gravity_plus - gravity_minus) / (2.0 * step)
+
+        self.assertTrue(np.allclose(analytic, numeric, rtol=1e-4, atol=1e-11))
+
+    def test_navigation_environment_syncs_after_linear_update(self) -> None:
+        filter_engine = OfflineESKF(self.config)
+        initial_position = np.array([10.0, 20.0, 5.0])
+        initial_velocity = np.array([1.0, 2.0, 0.1])
+        filter_engine.initialize(initial_position, initial_velocity, yaw=0.0)
+
+        residual = np.array([1.5])
+        H = np.zeros((1, ERROR_STATE_DIM))
+        H[0, ERROR_STATE.position.start + 2] = 1.0
+        R = np.array([[0.01]])
+        filter_engine.apply_linear_update(residual, H, R)
+
+        self.assertAlmostEqual(
+            filter_engine.current_navigation_environment.current_height_m,
+            float(filter_engine.state.position[2]),
+            places=9,
+        )
+
+    def test_covariance_remains_symmetric_after_attitude_injection(self) -> None:
+        filter_engine = OfflineESKF(self.config)
+        filter_engine.initialize(np.array([0.0, 0.0, 0.0]), np.array([1.0, 0.0, 0.0]), yaw=0.0)
+
+        residual = np.array([0.05])
+        H = np.zeros((1, ERROR_STATE_DIM))
+        H[0, ERROR_STATE.attitude.start + 2] = 1.0
+        R = np.array([[1e-3]])
+        filter_engine.apply_linear_update(residual, H, R)
+
+        self.assertTrue(np.allclose(filter_engine.P, filter_engine.P.T, atol=1e-12))
+        self.assertTrue(np.all(np.isfinite(filter_engine.P)))
+
+
+if __name__ == "__main__":
+    unittest.main()

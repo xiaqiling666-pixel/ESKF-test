@@ -1,0 +1,235 @@
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = PROJECT_ROOT / "02_src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+from eskf_stack.analysis.quality import CovarianceHealthTracker, SensorFreshnessTracker, classify_covariance_health
+from eskf_stack.analysis.state_machine import ModeDecision, ModeStateTracker, determine_mode
+
+
+class HealthStateTests(unittest.TestCase):
+    @staticmethod
+    def _covariance_health(
+        current_time: float,
+        pos_sigma_norm_m: float,
+        vel_sigma_norm_mps: float,
+        att_sigma_norm_deg: float,
+        tracker: CovarianceHealthTracker | None = None,
+    ):
+        tracker = tracker or CovarianceHealthTracker()
+        health = classify_covariance_health(
+            pos_sigma_norm_m=pos_sigma_norm_m,
+            vel_sigma_norm_mps=vel_sigma_norm_mps,
+            att_sigma_norm_deg=att_sigma_norm_deg,
+        )
+        return tracker.step(current_time, health)
+
+    def test_tracker_records_reject_streak_and_outage(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_pos", 0.2, available=True, used=False, rejected=True)
+        tracker.note_result("gnss_pos", 0.4, available=True, used=False, rejected=True)
+
+        snapshot = tracker.snapshot(1.0)
+
+        self.assertEqual(snapshot.gnss_pos_reject_streak, 2)
+        self.assertEqual(snapshot.gnss_vel_reject_streak, 0)
+        self.assertAlmostEqual(snapshot.gnss_pos_outage_s, 1.0, places=9)
+        self.assertAlmostEqual(snapshot.gnss_vel_outage_s, 1.0, places=9)
+        self.assertAlmostEqual(snapshot.gnss_outage_s, 1.0, places=9)
+
+    def test_state_machine_marks_gnss_degraded_on_rejections(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_pos", 0.2, available=True, used=False, rejected=True)
+        tracker.note_result("gnss_pos", 0.3, available=True, used=False, rejected=True)
+        tracker.note_result("gnss_pos", 0.4, available=True, used=False, rejected=True)
+        snapshot = tracker.snapshot(0.5)
+
+        decision = determine_mode(
+            snapshot,
+            quality_score=85.0,
+            covariance_health=self._covariance_health(0.5, 0.5, 0.2, 2.0),
+        )
+
+        self.assertEqual(decision.mode, "GNSS_DEGRADED")
+        self.assertEqual(decision.reason, "gnss_rejection_streak")
+
+    def test_state_machine_marks_inertial_hold_on_short_outage(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        snapshot = tracker.snapshot(1.2)
+
+        decision = determine_mode(
+            snapshot,
+            quality_score=55.0,
+            covariance_health=self._covariance_health(1.2, 0.8, 0.3, 3.0),
+        )
+
+        self.assertEqual(decision.mode, "INERTIAL_HOLD")
+        self.assertEqual(decision.reason, "short_gnss_outage")
+
+    def test_state_machine_uses_specific_covariance_reason_under_gnss(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        snapshot = tracker.snapshot(0.1)
+        covariance_tracker = CovarianceHealthTracker()
+
+        determine_mode(
+            snapshot,
+            quality_score=85.0,
+            covariance_health=self._covariance_health(0.1, 1.8, 0.2, 4.0, covariance_tracker),
+        )
+
+        decision = determine_mode(
+            snapshot,
+            quality_score=85.0,
+            covariance_health=self._covariance_health(0.6, 1.8, 0.2, 4.0, covariance_tracker),
+        )
+
+        self.assertEqual(decision.mode, "GNSS_DEGRADED")
+        self.assertEqual(decision.reason, "position_sigma_caution")
+
+    def test_state_machine_uses_specific_covariance_reason_without_gnss(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        snapshot = tracker.snapshot(6.0)
+        covariance_tracker = CovarianceHealthTracker()
+
+        determine_mode(
+            snapshot,
+            quality_score=25.0,
+            covariance_health=self._covariance_health(5.9, 3.4, 1.7, 6.0, covariance_tracker),
+        )
+
+        decision = determine_mode(
+            snapshot,
+            quality_score=25.0,
+            covariance_health=self._covariance_health(6.2, 3.4, 1.7, 6.0, covariance_tracker),
+        )
+
+        self.assertEqual(decision.mode, "DEGRADED")
+        self.assertEqual(decision.reason, "multiple_unhealthy_sigmas")
+
+    def test_covariance_health_tracker_accumulates_and_resets_duration(self) -> None:
+        tracker = CovarianceHealthTracker()
+
+        health0 = self._covariance_health(0.0, 1.8, 0.2, 4.0, tracker)
+        health1 = self._covariance_health(0.5, 1.8, 0.2, 4.0, tracker)
+        health2 = self._covariance_health(0.8, 0.8, 0.2, 4.0, tracker)
+
+        self.assertAlmostEqual(health0.caution_duration_s, 0.0, places=9)
+        self.assertAlmostEqual(health1.caution_duration_s, 0.5, places=9)
+        self.assertAlmostEqual(health2.caution_duration_s, 0.0, places=9)
+
+    def test_state_machine_does_not_degrade_on_short_covariance_caution(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        snapshot = tracker.snapshot(0.1)
+
+        decision = determine_mode(
+            snapshot,
+            quality_score=85.0,
+            covariance_health=self._covariance_health(0.1, 1.8, 0.2, 4.0),
+        )
+
+        self.assertEqual(decision.mode, "GNSS_STABLE")
+        self.assertEqual(decision.reason, "fresh_gnss_and_healthy_covariance")
+
+    def test_covariance_health_classifies_multiple_unhealthy_sources(self) -> None:
+        health = classify_covariance_health(
+            pos_sigma_norm_m=3.5,
+            vel_sigma_norm_mps=1.8,
+            att_sigma_norm_deg=12.0,
+        )
+
+        self.assertEqual(health.level, "UNHEALTHY")
+        self.assertEqual(health.reason, "multiple_unhealthy_sigmas")
+        self.assertTrue(health.caution)
+        self.assertTrue(health.unhealthy)
+        self.assertAlmostEqual(health.pos_excess_m, 0.5, places=9)
+        self.assertAlmostEqual(health.vel_excess_mps, 0.3, places=9)
+        self.assertAlmostEqual(health.att_excess_deg, 0.0, places=9)
+
+    def test_covariance_health_classifies_single_caution_source(self) -> None:
+        health = classify_covariance_health(
+            pos_sigma_norm_m=1.7,
+            vel_sigma_norm_mps=0.4,
+            att_sigma_norm_deg=10.0,
+        )
+
+        self.assertEqual(health.level, "CAUTION")
+        self.assertEqual(health.reason, "position_sigma_caution")
+        self.assertTrue(health.caution)
+        self.assertFalse(health.unhealthy)
+        self.assertAlmostEqual(health.pos_excess_m, 0.2, places=9)
+
+    def test_mode_tracker_holds_current_mode_until_confirmation(self) -> None:
+        tracker = ModeStateTracker(min_mode_hold_s=0.4, confirmation_time_s={"GNSS_DEGRADED": 0.2})
+
+        state0 = tracker.step(0.0, ModeDecision("GNSS_STABLE", "fresh"))
+        state1 = tracker.step(0.1, ModeDecision("GNSS_DEGRADED", "rejects"))
+        state2 = tracker.step(0.25, ModeDecision("GNSS_DEGRADED", "rejects"))
+
+        self.assertEqual(state0.mode, "GNSS_STABLE")
+        self.assertEqual(state1.mode, "GNSS_STABLE")
+        self.assertTrue(state1.transition_pending)
+        self.assertEqual(state2.mode, "GNSS_STABLE")
+        self.assertTrue(state2.transition_pending)
+
+    def test_mode_tracker_switches_after_hold_and_confirmation(self) -> None:
+        tracker = ModeStateTracker(min_mode_hold_s=0.4, confirmation_time_s={"GNSS_DEGRADED": 0.2})
+
+        tracker.step(0.0, ModeDecision("GNSS_STABLE", "fresh"))
+        tracker.step(0.1, ModeDecision("GNSS_DEGRADED", "rejects"))
+        tracker.step(0.35, ModeDecision("GNSS_DEGRADED", "rejects"))
+        state = tracker.step(0.45, ModeDecision("GNSS_DEGRADED", "rejects"))
+
+        self.assertEqual(state.mode, "GNSS_DEGRADED")
+        self.assertEqual(state.reason, "rejects")
+        self.assertFalse(state.transition_pending)
+
+    def test_mode_tracker_inserts_recovering_before_return_to_gnss(self) -> None:
+        tracker = ModeStateTracker(
+            min_mode_hold_s=0.2,
+            confirmation_time_s={"RECOVERING": 0.1, "GNSS_STABLE": 0.1},
+        )
+
+        tracker.step(0.0, ModeDecision("INERTIAL_HOLD", "short_gnss_outage"))
+        tracker.step(0.05, ModeDecision("GNSS_STABLE", "fresh_gnss_and_healthy_covariance"))
+        recovering = tracker.step(0.20, ModeDecision("GNSS_STABLE", "fresh_gnss_and_healthy_covariance"))
+
+        self.assertEqual(recovering.mode, "RECOVERING")
+        self.assertEqual(recovering.reason, "restoring_gnss_stability")
+
+    def test_mode_tracker_leaves_recovering_after_confirmation(self) -> None:
+        tracker = ModeStateTracker(
+            min_mode_hold_s=0.2,
+            confirmation_time_s={"RECOVERING": 0.1, "GNSS_STABLE": 0.1},
+        )
+
+        tracker.step(0.0, ModeDecision("INERTIAL_HOLD", "short_gnss_outage"))
+        tracker.step(0.05, ModeDecision("GNSS_STABLE", "fresh_gnss_and_healthy_covariance"))
+        tracker.step(0.20, ModeDecision("GNSS_STABLE", "fresh_gnss_and_healthy_covariance"))
+        tracker.step(0.25, ModeDecision("GNSS_STABLE", "fresh_gnss_and_healthy_covariance"))
+        stable = tracker.step(0.40, ModeDecision("GNSS_STABLE", "fresh_gnss_and_healthy_covariance"))
+
+        self.assertEqual(stable.mode, "GNSS_STABLE")
+        self.assertEqual(stable.reason, "fresh_gnss_and_healthy_covariance")
+
+
+if __name__ == "__main__":
+    unittest.main()

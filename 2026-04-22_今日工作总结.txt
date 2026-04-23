@@ -1,0 +1,162 @@
+日期
+2026-04-22
+
+项目
+ESKF离线融合项目
+
+今日完成内容
+1. 状态机基础健康信息接入
+   - 新增 GNSS 拒绝计数和失联时长：
+     gnss_pos_reject_streak
+     gnss_vel_reject_streak
+     gnss_pos_outage_s
+     gnss_vel_outage_s
+     gnss_outage_s
+   - 状态机输出从单一 mode 扩展为：
+     mode
+     mode_reason
+   - 新增状态：
+     GNSS_DEGRADED
+
+2. 状态机加入滞回和切换记忆
+   - 新增：
+     mode_target
+     mode_target_reason
+     mode_candidate
+     mode_candidate_reason
+     mode_hold_s
+     mode_candidate_hold_s
+     mode_transition_pending
+   - 解决了模式逐帧抖动的问题
+
+3. 状态机恢复路径补全
+   - 从退化侧模式回到 GNSS 正常模式时
+     不再直接跳回
+   - 当前会先经过：
+     RECOVERING
+
+4. 状态机统计与可视化增强
+   - metrics_summary.txt 新增：
+     mode_* 持续时间/占比/进入次数
+     mode_reason_* 持续时间/占比/进入次数
+     mode_transition_count
+     pending_row_count
+     pending_duration_s
+   - 新增图：
+     quality_mode.png 三层状态视图
+     state_machine_summary.png 状态机摘要图
+
+5. 协方差健康诊断增强
+   - 新增输出：
+     covariance_health
+     covariance_health_reason
+     covariance_caution
+     covariance_unhealthy
+     covariance_pos_excess_m
+     covariance_vel_excess_mps
+     covariance_att_excess_deg
+   - 新增统计：
+     covariance_health_* 持续时间/占比/进入次数
+     covariance_health_reason_* 持续时间/占比/进入次数
+     covariance_caution_row_count
+     covariance_unhealthy_row_count
+
+6. 协方差原因细化
+   - 状态机中的协方差相关 mode_reason
+     已从泛化原因改成具体原因
+   - 当前会直接输出例如：
+     position_sigma_caution
+     position_sigma_unhealthy
+     multiple_unhealthy_sigmas
+
+7. 协方差异常持续时间接入状态机
+   - 新增：
+     covariance_caution_duration_s
+     covariance_unhealthy_duration_s
+   - 状态机中协方差驱动的退化判断
+     已改为结合持续时间判定
+   - metrics_summary.txt 新增：
+     max_covariance_caution_duration_s
+     max_covariance_unhealthy_duration_s
+
+今日验证结果
+1. 自动化验证
+   - python -m unittest discover 05_tests
+   - 当前 19 项测试通过
+
+2. 主流程验证
+   - python 02_src/main.py
+   - 已重新跑通
+   - 处理样本数：
+     6001
+
+3. 结果文件核对
+   - fusion_output.csv 已确认包含：
+     新增状态机字段
+     新增协方差健康字段
+     新增协方差持续时间字段
+   - metrics_summary.txt 已确认包含：
+     mode 统计
+     mode_reason 统计
+     covariance_health 统计
+     max_covariance_caution_duration_s
+     max_covariance_unhealthy_duration_s
+
+当前项目状态
+1. 当前项目已经不是单纯 demo
+   - 已具备：
+     core / measurements / adapters / analysis / tests 分层
+     状态机滞回
+     恢复桥接
+     模式统计
+     协方差健康诊断
+     自动化回归测试
+
+2. 当前仍然是研究原型，不是完整工程系统
+   - 仍属于离线融合原型
+   - 还没有接入真实 PX4 / ROS2 / Gazebo 日志
+   - 还不是完整经纬高 KF-GINS 主线
+   - 还没有杆臂、外参、时间偏移等更完整状态
+
+3. 当前结果概览
+   - position_rmse_m = 1.409304
+   - velocity_rmse_mps = 0.327819
+   - yaw_rmse_deg = 0.676386
+   - mean_quality_score = 91.806310
+   - mode_transition_count = 4
+   - mode_duration_GNSS_STABLE_s = 105.080000
+   - mode_duration_DEGRADED_s = 10.580000
+   - mode_duration_RECOVERING_s = 0.420000
+   - max_covariance_caution_duration_s = 12.840000
+   - max_covariance_unhealthy_duration_s = 10.760000
+   - pending_duration_s = 1.340000
+   - pipeline_runtime_s = 19.534953
+
+今天主要修改文件
+1. 02_src\eskf_stack\analysis\quality.py
+2. 02_src\eskf_stack\analysis\state_machine.py
+3. 02_src\eskf_stack\analysis\evaluator.py
+4. 02_src\eskf_stack\analysis\plotter.py
+5. 02_src\eskf_stack\analysis\__init__.py
+6. 02_src\eskf_stack\app.py
+7. 05_tests\test_health_state.py
+8. 05_tests\test_metrics.py
+9. 00_说明\README_先看我.txt
+10. 00_说明\项目架构说明.txt
+11. 00_说明\后续扩展路线.txt
+
+今日收尾补充
+1. 已同步更新项目说明文件
+   - README_先看我.txt
+   - 项目架构说明.txt
+   - 后续扩展路线.txt
+2. 这样当前项目的代码、结果、日志和说明已经对齐
+
+下一步建议
+1. 接真实日志前
+   - 先把状态机和协方差健康图进一步联动
+   - 明确“退化原因”和“恢复原因”的阈值配置
+
+2. 如果继续按研究路线推进
+   - 下一阶段更合适的是开始接真实 PX4 / ROS2 / Gazebo 数据适配层
+   - 而不是继续只在 demo 数据上扩状态机字段

@@ -1,0 +1,572 @@
+日期
+2026-04-23
+
+项目
+ESKF离线融合项目
+
+今日工作记录
+1. 今日起点判断
+   - 截至 2026-04-22，项目已经完成：
+     状态机
+     协方差健康诊断
+     结果统计与可视化
+     自动化回归测试
+   - 当前最缺的不是继续扩状态机字段
+   - 而是打开真实日志接入入口
+
+2. 今日第一步
+   - 将 adapters 从“只支持标准 demo csv”
+     重构为“带数据适配器分发入口”
+   - 当前已新增：
+     dataset_adapter 配置
+     load_dataframe_from_config 分发入口
+   - 现阶段默认仍使用：
+     standard_csv
+
+3. 本步具体修改文件
+   - 02_src\eskf_stack\config.py
+   - 02_src\eskf_stack\adapters\loader.py
+   - 02_src\eskf_stack\adapters\__init__.py
+   - 02_src\eskf_stack\app.py
+   - 01_data\config.json
+   - 05_tests\test_adapters.py
+
+4. 当前这一步已验证
+   - unittest: 21 项通过
+   - main.py 已重新跑通
+   - 现有 demo 数据链路未被破坏
+
+5. 这一步的直接结果
+   - 现在主流程已经不再写死只读标准 csv
+   - 后面可以继续往 adapters 里挂：
+     px4_csv
+     ros2_export
+     gazebo_export
+   - 且不需要先改 core
+
+6. 今日第二步
+   - 新增 GREAT-MSF 常用数据适配器：
+     great_msf_imu_ins
+   - 当前支持：
+     GREAT-MSF IMU txt
+     GREAT-MSF .ins 结果文件
+   - 已完成：
+     最近邻时间对齐
+     ECEF -> 局部 ENU 位置转换
+     ECEF -> 局部 ENU 速度转换
+     按首个 .ins 解自动覆盖导航参考点
+
+7. 本步具体修改文件
+   - 02_src\eskf_stack\config.py
+   - 02_src\eskf_stack\adapters\great_msf_dataset.py
+   - 02_src\eskf_stack\adapters\loader.py
+   - 02_src\eskf_stack\adapters\__init__.py
+   - 02_src\eskf_stack\app.py
+   - 05_tests\test_adapters.py
+
+8. 当前这一步已验证
+   - unittest: 22 项通过
+   - main.py 已重新跑通
+   - 已用真实数据完成适配器读取检查：
+     DX\04_inputs\great_msf\419\419_IMU_GREAT_agfrd_sow.txt
+     DX\06_results\great_msf\419\TCPPP\WNLBS-419-TCPPP-BEST.ins
+   - 已用真实数据跑通一次完整管线检查
+     输出目录：
+     03_results_great_msf_check
+
+9. 本步额外发现
+   - GREAT-MSF .ins 作为当前项目里的“直接 GNSS 观测”时
+     现有创新门限和测量模型并不匹配
+   - 真实检查里虽然整条管线已经能跑
+     但当前只接受了很少量的 gnss 更新
+   - 说明下一步不该继续改 adapters
+   - 而该开始处理：
+     GREAT-MSF 结果作为外部轨迹观测时的测量模型和阈值
+
+10. 原始数据检查
+   - 已检查飞控原始日志：
+     DX\04_inputs\raw\00000422.BIN
+   - 已检查定位原始日志：
+     UM982_20260405_243\log [2026-04-21_15-37-18].bin
+
+11. 当前识别结果
+   - 00000422.BIN 已确认是飞控 DataFlash 二进制日志
+   - 其中已经能识别出：
+     IMU
+     GPS
+     BARO
+     MAG
+     ATT
+     XKF
+   - 说明它是后面接入飞控原始数据的优先入口
+
+12. UM982 原始文件当前识别结果
+   - 该文件不是简单 csv
+   - 当前更像串口混合协议流
+   - 已识别出：
+     #HEADINGA
+     $GNGGA
+     #GNRMC
+     #E6CLOCKFULLBLOCKA
+   - 说明它后面可以继续解
+   - 但第一优先级不应该高于飞控 DataFlash
+
+13. 这一步的直接结论
+   - 后面真正该先做的是：
+     从 00000422.BIN 提取 IMU / BARO / MAG / GPS
+   - UM982 原始 bin 先作为第二优先级
+   - 等飞控原始链路打通后再决定是否直接解 UM982 原始协议
+
+14. 解码后数据链确认
+   - 已确认 DX 里存在直接可接的解码后目录：
+     05_data\dx_data\decoded\00000422
+   - 当前目录包含：
+     IMU_Full.csv
+     GPS_Raw.csv
+     POS_Global_Truth.csv
+     XKF_Local_Truth.csv
+   - 且这些文件由：
+     02_code\extract_code\read_bin.py
+     统一生成
+
+15. 今日第三步
+   - 新增 decoded 飞控数据适配器：
+     dx_decoded_flight_csv
+   - 当前支持直接读取：
+     IMU_Full.csv
+     GPS_Raw.csv
+     POS_Global_Truth.csv
+     XKF_Local_Truth.csv
+   - 已完成：
+     GPS 全局坐标 -> 本项目局部 ENU
+     Truth 全局坐标 -> 本项目局部 ENU
+     XKF 速度 NED -> ENU
+     Yaw -> 本项目 yaw 角定义
+     以 decoded 目录为输入的统一 DataFrame 构造
+
+16. 本步具体修改文件
+   - 02_src\eskf_stack\adapters\dx_decoded_dataset.py
+   - 02_src\eskf_stack\adapters\loader.py
+   - 05_tests\test_adapters.py
+
+17. 当前这一步已验证
+   - unittest: 23 项通过
+   - main.py 已重新跑通
+   - 已用真实目录完成读取检查：
+     DX\05_data\dx_data\decoded\00000422
+   - 已用真实目录跑通完整管线检查：
+     03_results_dx_decoded_check
+
+18. 本步关键结论
+   - 你说得对，当前真正该接的是解码后的数据，不是原始 .BIN
+   - 现在项目已经能直接吃这套 decoded 数据目录
+   - 但当前 decoded 数据里：
+     GPS_Raw.csv 只有位置，没有速度
+     也没有现成 baro / mag
+   - 所以项目为了跑通，只能临时从 GPS 位置差分构造速度
+   - 这会导致真实数据上：
+     gnss_vel_rejections 很高
+     gnss_pos_rejections 也很高
+
+19. 输入源角色澄清
+   - 已确认你当前主要数据形态是：
+     提取后的 IMU 数据
+     解码后的 obs/nav 数据
+   - 这说明项目后面不能只记“adapter kind”
+   - 还需要把本次运行到底用了哪些源文件写清楚
+
+20. 今日第四步
+   - 新增数据源摘要输出
+   - 当前每次运行后都会在 metrics 目录下生成：
+     dataset_source_summary.txt
+   - 其中会明确记录：
+     adapter_kind
+     imu_file
+     gps_file
+     truth_file
+     reference_mode
+     row_count
+     navigation_reference_override
+
+21. 本步具体修改文件
+   - 02_src\eskf_stack\adapters\loader.py
+   - 02_src\eskf_stack\adapters\dx_decoded_dataset.py
+   - 02_src\eskf_stack\adapters\great_msf_dataset.py
+   - 02_src\eskf_stack\app.py
+   - 05_tests\test_adapters.py
+
+22. 当前这一步已验证
+   - unittest: 23 项通过
+   - main.py 已重新跑通
+   - 已用真实 decoded 目录核对：
+     03_results_dx_decoded_check\metrics\dataset_source_summary.txt
+   - 当前摘要文件已经能明确写出：
+     IMU_Full.csv
+     GPS_Raw.csv
+     POS_Global_Truth.csv
+     XKF_Local_Truth.csv
+
+23. 今日第五步
+   - 修正 decoded 飞控数据入口里的观测语义
+   - 新增：
+     gps_velocity_mode
+   - 当前支持：
+     derived_from_pos
+     none
+     from_xkf
+   - 同时主流程初始化已放宽为：
+     只要有 gnss_pos 就允许初始化
+   - 如果没有 gnss_vel：
+     先用零速度初始化
+     yaw 先用 mag
+     没有 mag 时退化为 0
+
+24. 本步具体修改文件
+   - 02_src\eskf_stack\adapters\dx_decoded_dataset.py
+   - 02_src\eskf_stack\app.py
+   - 05_tests\test_adapters.py
+   - 05_tests\test_app.py
+
+25. 当前这一步已验证
+   - unittest: 25 项通过
+   - main.py 已重新跑通
+   - 已用真实 decoded 目录做两组对比运行：
+     03_results_dx_decoded_compare_derived
+     03_results_dx_decoded_compare_pos_only
+   - 当前已确认：
+     关闭差分伪速度后
+     gnss_vel_rejections 从 2845 降到 0
+   - 但 gnss_pos_updates 仍只有 4
+     gnss_pos_rejections 仍有 2842
+   - 说明当前主要矛盾已经从“速度语义错误”
+     收敛为“位置观测门限 / 对齐 / 参考一致性”问题
+
+26. 这一步的直接结论
+   - 现在项目已经能正确支持：
+     只有位置的 decoded GPS 输入
+   - 这比之前把位置差分硬当速度更接近真实数据语义
+   - 下一步不该继续补速度假量
+   - 而应该开始检查：
+     GNSS 位置测量噪声
+     NIS 门限
+     参考点一致性
+     时间对齐误差
+
+27. 今日第六步
+   - 对 decoded GPS 位置观测问题做定位检查
+   - 已额外核对：
+     GPS -> IMU 最近邻时间对齐误差
+     GPS 与 POS_Global_Truth 的位置一致性
+     真实数据上的 GNSS 位置创新增长过程
+
+28. 本步关键检查结果
+   - 时间对齐不是主要矛盾：
+     平均约 8.8 ms
+     最大约 18.1 ms
+   - GPS 与 POS_Global_Truth 的平均三维偏差约 1.42 m
+   - 说明当前 `gnss_pos` 大面积拒收
+     不是因为原始 GPS 完全不可用
+   - 更主要是：
+     只有位置、没有速度和航向时
+     过早初始化会让状态很快漂开
+
+29. 今日第七步
+   - 改进主流程初始化策略
+   - 当前不再对“只有 gnss_pos、没有 gnss_vel / mag_yaw”的帧直接初始化
+   - 改为：
+     先缓存首个 GNSS 位置
+     等到后续位置满足最小时间差和最小平面位移后
+     用两帧位置估计初始速度和初始 yaw
+     再进行 bootstrap 初始化
+
+30. 本步具体修改文件
+   - 02_src\eskf_stack\app.py
+   - 05_tests\test_app.py
+
+31. 当前这一步已验证
+   - unittest: 26 项通过
+   - main.py 已重新跑通
+   - 已用真实 decoded 目录重跑：
+     03_results_dx_decoded_compare_pos_only_bootstrap
+
+32. 本步真实数据结果
+   - 与旧的 `position-only` 方案相比：
+     gnss_pos_rejections 从 2842 降到 2645
+     mean_gnss_pos_nis 从 8332.19 降到 8154.02
+     final_pos_sigma_norm_m 从 1775174.98 降到 1469240.95
+     final_vel_sigma_norm_mps 从 9381.17 降到 6965.74
+   - 但：
+     gnss_pos_updates 仍然只有 3
+   - 说明 bootstrap 初始化方向是对的
+     但单靠它还不够
+
+33. 今日第八步
+   - 对 decoded GPS 的 `gnss_pos_std / NIS` 门限做了小范围参数扫描
+   - 已测试多组：
+     0.8 / 1.5 / 2.5 / 4.0 / 6.0 m
+     以及更宽的 adapt / reject 门限
+
+34. 本步直接结论
+   - 单独放宽位置噪声和门限
+     只能把 `gnss_pos_updates` 从 3 提高到 11 左右
+   - 但大部分位置观测仍然被拒收
+   - 说明“继续单纯调门限”不是主解
+   - 后面更值得做的是：
+     引入更可靠的初始航向 / 速度来源
+     或者把 obs/nav 解进一步整理成更稳定的外部观测输入
+
+35. 今日第九步
+   - 新增外部解算结果适配器：
+     dx_imu_external_solution
+   - 当前支持直接读取：
+     IMU_Full.csv + 外部 .ins 解算结果
+   - 已支持：
+     自动估计 IMU 时间与周内秒之间的时间偏移
+     ECEF -> ENU 位置速度转换
+     可选写入外部解 yaw
+     可选接 decoded 目录里的 truth 字段做对照
+
+36. 本步具体修改文件
+   - 02_src\eskf_stack\adapters\dx_external_solution_dataset.py
+   - 02_src\eskf_stack\adapters\loader.py
+   - 05_tests\test_adapters.py
+
+37. 当前这一步已验证
+   - unittest: 27 项通过
+   - main.py 已重新跑通
+   - 已用真实数据跑通：
+     03_results_dx_external_tcppp_422
+     03_results_dx_external_lcppp_422
+
+38. 本步关键发现
+   - 新外部解算入口虽然跑通
+     但拒收仍然很高
+   - 进一步看前几次更新可见：
+     两次 GNSS 更新之间
+     状态在不到 1 秒内就明显向下发散
+   - 这说明问题不只是门限
+     更像 IMU 输入语义本身不匹配
+
+39. 今日第十步
+   - 核对 demo 生成逻辑和 mechanization 后确认：
+     当前滤波器吃的是“比力”
+     静止时 z 轴应接近 +9.81
+   - 而 `IMU_Full.csv` 静止段是接近 -9.82
+   - 因此新增 IMU 轴系变换入口：
+     imu_transform_mode
+   - 当前支持：
+     raw
+     ardupilot_frd_to_flu
+     flip_z_accel
+     negate_all_accel
+
+40. 本步具体修改文件
+   - 02_src\eskf_stack\adapters\imu_transform.py
+   - 02_src\eskf_stack\adapters\dx_decoded_dataset.py
+   - 02_src\eskf_stack\adapters\dx_external_solution_dataset.py
+   - 05_tests\test_adapters.py
+
+41. 当前这一步已验证
+   - unittest: 28 项通过
+   - main.py 已重新跑通
+   - 已用真实数据完成对比：
+     03_results_dx_decoded_pos_only_frd_to_flu
+     03_results_dx_external_tcppp_422_frd_to_flu
+
+42. 本步真实数据结论
+   - 对当前 `00000422` 这组数据
+     推荐的 IMU 变换模式是：
+     ardupilot_frd_to_flu
+   - 对 decoded position-only 路线
+     改完后结果出现质变：
+     gnss_pos_updates: 3 -> 2648
+     gnss_pos_rejections: 2645 -> 0
+     mean_gnss_pos_nis: 8154.02 -> 0.0496
+     final_pos_sigma_norm_m: 1469240.95 -> 0.6516
+     final_vel_sigma_norm_mps: 6965.74 -> 0.5329
+   - 对外部 TCPPP 路线
+     也明显改善，但仍不如 decoded position-only 稳定：
+     gnss_pos_updates: 1 -> 18
+     gnss_pos_rejections: 1037 -> 1020
+     gnss_vel_rejections: 1037 -> 1027
+   - 所以当前阶段的主结论是：
+     先把 IMU 轴系语义修正对
+     你现在手头的 decoded GPS position-only 路线就已经可用
+
+43. 今日第十一步
+   - 在保留通用配置不动的前提下
+     新增 `00000422` 专用运行配置
+   - 当前已新增：
+     01_data\config_00000422_decoded.json
+     04_tools\运行00000422_推荐配置.bat
+   - 同时主入口已支持：
+     `python 02_src\main.py <配置文件路径>`
+
+44. 本步直接结果
+   - 以后默认 demo / 通用配置
+     仍走：
+     01_data\config.json
+   - `00000422` 推荐真实数据配置
+     单独走：
+     01_data\config_00000422_decoded.json
+   - 后面如果继续做 `00000419` / `00000418`
+     可以按同样方式继续扩专用配置
+
+45. 今日第十二步
+   - 把统一输入契约正式落成代码约束
+   - 当前新增：
+     02_src\eskf_stack\adapters\contract.py
+   - 统一输入契约已明确区分：
+     必需字段
+     可选标准字段
+     可保留扩展字段
+
+46. 本步具体修改文件
+   - 02_src\eskf_stack\adapters\contract.py
+   - 02_src\eskf_stack\adapters\csv_dataset.py
+   - 02_src\eskf_stack\adapters\loader.py
+   - 05_tests\test_adapters.py
+   - 00_说明\统一输入契约.txt
+   - 00_说明\README_先看我.txt
+   - 00_说明\项目架构说明.txt
+
+47. 本步直接结果
+   - 所有 adapter 返回的数据
+     现在都会在进入主流程前统一过契约检查
+   - 缺少必需字段会直接报错
+   - 缺少可选字段会自动补 NaN
+   - 输出会统一按 time 排序
+   - 这说明项目主线第一次有了“可执行的统一输入契约”
+     不再只是文档约定
+
+48. 今日第十三步
+   - 把配置分层正式落成代码约束
+   - 当前新增：
+     config_metadata
+   - 当前允许的配置角色：
+     default_general
+     sample_validation
+     experiment
+
+49. 本步具体修改文件
+   - 02_src\eskf_stack\config.py
+   - 02_src\eskf_stack\app.py
+   - 01_data\config.json
+   - 01_data\config_00000422_decoded.json
+   - 01_data\配置说明.txt
+   - 00_说明\README_先看我.txt
+   - 05_tests\test_config.py
+
+50. 本步直接结果
+   - `01_data\config.json`
+     现在被代码层明确约束为：
+     default_general
+   - 非默认单独配置
+     不能再冒充主配置
+   - 运行结果里的：
+     dataset_source_summary.txt
+     现在也会写出：
+     config_path
+     config_profile
+     config_name
+     config_purpose
+   - 说明后面看结果目录时
+     已经能直接分辨：
+     这是通用配置结果
+     还是样例验证结果
+
+51. 当前这一步已验证
+   - unittest: 32 项通过
+   - main.py 已重新跑通
+   - 已核对：
+     03_results\metrics\dataset_source_summary.txt
+     现在已经能写出配置角色信息
+
+52. 今日第十四步
+   - 把统一输入契约进一步细化成三层字段分级
+   - 当前已明确分成：
+     核心输入层
+     可选观测层
+     诊断/真值层
+
+53. 本步具体修改文件
+   - 02_src\eskf_stack\adapters\contract.py
+   - 02_src\eskf_stack\adapters\__init__.py
+   - 05_tests\test_adapters.py
+   - 00_说明\统一输入契约.txt
+   - 00_说明\项目架构说明.txt
+
+54. 本步直接结果
+   - `time / ax ay az / gx gy gz`
+     现在被明确标为：
+     核心输入层
+   - `gnss_* / baro_h / mag_yaw`
+     现在被明确标为：
+     可选观测层
+   - `truth_*`
+     现在被明确标为：
+     诊断/真值层
+   - 这说明后面再接新数据源时
+     不会再把评估字段和主观测字段混为一谈
+
+55. 这一步为什么重要
+   - 如果不做这一步
+     后面很容易把：
+     `truth_x`
+     这种字段误塞回主流程
+   - 现在三层边界已经更清楚：
+     哪些字段主流程必须要
+     哪些字段有就更新
+     哪些字段只是评估用
+
+56. 当前这一步已验证
+   - unittest: 33 项通过
+   - main.py 已重新跑通
+
+57. 今日第十五步
+   - 把模块消费边界进一步落成代码结构
+   - 当前已新增：
+     观测视图
+     真值视图
+     analysis 真值访问器
+
+58. 本步具体修改文件
+   - 02_src\eskf_stack\adapters\csv_dataset.py
+   - 02_src\eskf_stack\adapters\__init__.py
+   - 02_src\eskf_stack\measurements\base.py
+   - 02_src\eskf_stack\app.py
+   - 02_src\eskf_stack\analysis\truth_access.py
+   - 02_src\eskf_stack\analysis\evaluator.py
+   - 02_src\eskf_stack\analysis\plotter.py
+   - 05_tests\test_app.py
+   - 00_说明\项目架构说明.txt
+   - 00_说明\统一输入契约.txt
+   - 00_说明\README_先看我.txt
+
+59. 本步直接结果
+   - `measurements`
+     现在从类型边界上只接观测视图
+   - 观测视图里只有：
+     gnss_pos
+     gnss_vel
+     baro_h
+     mag_yaw
+   - `analysis`
+     现在通过统一真值访问器读取 `truth_*`
+   - 说明项目主线已经从：
+     字段分层
+     进一步推进到：
+     模块消费分层
+
+60. 这一步为什么重要
+   - 如果只在文档里说：
+     measurements 不要碰 truth
+     这条边界很容易被后续代码破坏
+   - 现在至少在代码结构上
+     这条边界已经更明确
+   - 后面继续扩测量模型时
+     不容易再把评估字段混进主滤波逻辑
+
+61. 当前这一步已验证
+   - unittest: 34 项通过
+   - main.py 已重新跑通

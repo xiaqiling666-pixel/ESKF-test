@@ -1,0 +1,137 @@
+输入数据文件
+默认读取 01_data\generated\demo_sensor_log.csv
+
+当前输入方式
+项目现在不只支持单个标准 csv。
+当前共有三类入口：
+1. `standard_csv`
+2. `great_msf_imu_ins`
+3. `dx_decoded_flight_csv`
+4. `dx_imu_external_solution`
+
+如果走 `standard_csv`
+就按下面这个统一字段表准备数据。
+
+数据格式
+每一行代表一个时刻。
+时间按秒，角速度按 rad/s，加速度按 m/s^2，位置按 m，速度按 m/s，航向按 rad。
+
+必需字段
+time
+ax
+ay
+az
+gx
+gy
+gz
+
+可选字段
+gnss_x
+gnss_y
+gnss_z
+gnss_vx
+gnss_vy
+gnss_vz
+baro_h
+mag_yaw
+
+示例数据里还带有真值字段，便于评估
+truth_x
+truth_y
+truth_z
+truth_vx
+truth_vy
+truth_vz
+truth_yaw
+
+缺测怎么表示
+如果某个时刻该传感器没有输出，就写 NaN。
+例如 GNSS 是 5Hz，而 IMU 是 50Hz，那么大部分 IMU 行里的 GNSS 字段都应该是 NaN。
+
+建议你自己的日志整理规则
+1. 先统一时间轴，以 IMU 为主时间轴。
+2. 其他传感器按最近时刻对齐到 IMU 行。
+3. 没到采样时刻的字段填 NaN，不要乱插值。
+4. 单位一定要统一，尤其是角速度和航向。
+
+当前代码里的测量更新
+GNSS 位置
+直接更新位置状态。
+
+GNSS 速度
+直接更新速度状态。
+
+气压计高度
+只更新 z 方向高度。
+
+磁罗盘航向
+只更新 yaw。
+
+decoded 飞控目录输入说明
+如果走 `dx_decoded_flight_csv`，当前不是直接读一个总表，而是读一个目录：
+1. `IMU_Full.csv`
+2. `GPS_Raw.csv`
+3. `POS_Global_Truth.csv`
+4. `XKF_Local_Truth.csv`
+
+当前 decoded 目录里的字段语义
+1. `IMU_Full.csv`
+   作为主时间轴输入。
+2. `GPS_Raw.csv`
+   当前按位置观测使用。
+3. `POS_Global_Truth.csv`
+   当前只作为离线评估真值位置使用。
+4. `XKF_Local_Truth.csv`
+   当前只作为离线评估真值速度和航向使用。
+
+当前 decoded 模式下的速度选项
+1. `gps_velocity_mode = none`
+   只做 GNSS 位置更新。
+   这是目前更符合你当前数据语义的安全模式。
+2. `gps_velocity_mode = derived_from_pos`
+   从 `GPS_Raw.csv` 的位置差分构造速度。
+   只能当临时观测，不应该默认当成高可信速度源。
+3. `gps_velocity_mode = from_xkf`
+   把 `XKF_Local_Truth.csv` 的速度对齐给 GPS 行。
+   这个模式更适合调试，不适合当正式真实观测来源。
+
+当前运行后的输入核对文件
+每次运行后都会在结果目录下输出：
+`metrics\dataset_source_summary.txt`
+里面会写清楚：
+1. 这次用的是哪种 adapter
+2. 具体读了哪些文件
+3. 参考点怎么设的
+4. 行数和对齐容差是多少
+
+IMU 轴系变换说明
+对 `IMU_Full.csv` 这类飞控提取数据，当前已经支持：
+`imu_transform_mode`
+
+可选值
+1. `raw`
+   不做任何变换。
+2. `ardupilot_frd_to_flu`
+   适合飞控常见的前右下 `FRD` 到本项目前左上 `FLU` 假设。
+   当前 `00000422` 这组数据推荐优先试这个。
+3. `flip_z_accel`
+   只翻加速度 z 轴。
+4. `negate_all_accel`
+   三个加速度轴全部取反。
+
+当前经验结论
+1. 对 `DX\05_data\dx_data\decoded\00000422`
+   直接用 `raw` 会导致状态很快向下发散。
+2. 改成 `imu_transform_mode = ardupilot_frd_to_flu`
+   后，`decoded GPS position-only` 路线已经能稳定工作。
+
+外部解算结果输入说明
+如果走 `dx_imu_external_solution`，当前输入是：
+1. `IMU_Full.csv`
+2. 外部 `.ins` 解算结果
+
+当前支持
+1. 自动估计 `TimeUS` 与 `Seconds of Week` 的时间偏移
+2. 把外部解算的 ECEF 位置速度转成 ENU
+3. 可选把外部解算 yaw 写入 `mag_yaw`
+4. 可选读取 decoded 目录里的 truth 文件做离线对照
