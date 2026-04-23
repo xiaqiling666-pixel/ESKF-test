@@ -44,7 +44,11 @@
     "static_window_min_samples": 50,
     "static_max_accel_std_mps2": 0.25,
     "static_max_gyro_std_radps": 0.03,
-    "static_gravity_norm_tolerance_mps2": 1.5
+    "static_gravity_norm_tolerance_mps2": 1.5,
+    "bootstrap_min_dt_s": 0.15,
+    "bootstrap_min_horizontal_displacement_m": 0.5,
+    "heading_wait_timeout_s": 2.0,
+    "zero_yaw_fallback_enabled": false
   },
   "time_step_management": {
     "min_positive_dt_s": 0.0001,
@@ -55,7 +59,11 @@
     "gnss_pos_nis_adapt_threshold": 7.815,
     "gnss_pos_nis_reject_threshold": 16.266,
     "gnss_vel_nis_adapt_threshold": 7.815,
-    "gnss_vel_nis_reject_threshold": 16.266
+    "gnss_vel_nis_reject_threshold": 16.266,
+    "baro_nis_adapt_threshold": 3.841,
+    "baro_nis_reject_threshold": 10.828,
+    "mag_yaw_nis_adapt_threshold": 3.841,
+    "mag_yaw_nis_reject_threshold": 10.828
   },
   "navigation_environment": {
     "frame": "ENU",

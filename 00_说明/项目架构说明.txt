@@ -46,6 +46,28 @@
 - 给 `gyro bias` 初值
 - 给 `accel bias` 粗初值
 
+当前初始化链路又进一步补了诊断状态：
+- WAITING_GNSS
+- WAITING_BOOTSTRAP_MOTION
+- READY_DIRECT_INIT
+- READY_BOOTSTRAP_INIT
+- INITIALIZED
+
+并且会记录：
+- 当前卡在哪个阶段
+- 为什么还没进入初始化
+- 当前 heading 来自哪里
+- static alignment 是否准备好
+
+当前又进一步补了等待控制：
+- 没有 heading 时不会无限等待
+- 可以配置最长等待时间
+- 可以配置是否允许超时后回退到 `zero yaw` 初始化
+
+这条回退当前默认关闭，
+目的是先把控制能力做出来，
+而不是默认替你做激进初始化。
+
 这里要明确一个工程事实：
 纯静止段对横向 `accel bias` 不完全可观，
 所以这层现在给的是“粗估”，
@@ -75,6 +97,12 @@
 - 异常拒绝
 - 自适应 R 放大
 - 连续拒绝后的恢复阶段渐进重接入
+
+截至当前版本，这层统一策略已经覆盖：
+- gnss_position
+- gnss_velocity
+- barometer
+- mag_yaw
 
 这样做的目的不是多包一层，而是把：
 “量测模型怎么写”
@@ -127,6 +155,8 @@
 - 模式统计
 - 原因统计
 - 状态机摘要图
+- 初始化运行级指标
+- 初始化可读摘要输出
 
 这层当前的真实链路大致是：
 `sensor freshness + innovations + covariance health`
@@ -134,6 +164,19 @@
 -> `determine_mode`
 -> `ModeStateTracker`
 -> `CSV / figures / metrics`
+
+当前 `analysis` 对初始化这条线又多承担了一层职责：
+- 把 `initialization_summary` 里的文本诊断
+  转成可回归的 metrics
+- 把初始化阶段、方式、等待时长和 fallback 使用情况
+  组织进 `metrics_summary.txt`
+
+这样做的目的不是多写一个 txt，
+而是让初始化不再只存在于：
+- `dataset_source_summary.txt`
+- 裸 metric 键值
+
+而是能直接进入实验结果阅读链路。
 
 5. tests
 当前已经不只是最小核心检查。

@@ -819,3 +819,277 @@ ESKF离线融合项目
      `一键运行示例.bat`
    - 以后新生成的缓存和结果目录
      不该再继续进入 Git 跟踪
+
+86. 今日第二十一步
+   - 做初始化链路和观测管理层的收口检查
+   - 当前确认的主线问题是：
+     measurement manager 虽然已经存在
+     但此前统一 policy 只真正覆盖了 GNSS
+     `baro / mag` 还没有接上配置化门控阈值
+
+87. 本步具体修改文件
+   - 02_src\eskf_stack\config.py
+   - 01_data\config.json
+   - 01_data\config_00000422_decoded.json
+   - 02_src\eskf_stack\measurements\barometer.py
+   - 02_src\eskf_stack\measurements\mag_yaw.py
+   - 05_tests\test_config.py
+   - 05_tests\test_measurements.py
+   - 01_data\配置说明.txt
+   - 00_说明\项目架构说明.txt
+   - 00_说明\README_先看我.txt
+
+88. 本步直接结果
+   - 当前 `innovation_management`
+     不再只定义 GNSS 阈值
+   - 已补充：
+     `baro_nis_adapt_threshold`
+     `baro_nis_reject_threshold`
+     `mag_yaw_nis_adapt_threshold`
+     `mag_yaw_nis_reject_threshold`
+   - `baro` 和 `mag_yaw`
+     现在也真正接入了 manager 的统一：
+     NIS
+     reject
+     adaptive R
+
+89. 这一步为什么重要
+   - 这次查出来的问题不是代码跑不通
+     而是框架边界还没完全收口
+   - 如果只让 GNSS 走统一 policy
+     `baro / mag` 还是各走各的
+     那 measurement manager 就还不算真正完成
+   - 现在这层才更接近“所有现有观测统一受管”
+
+90. 当前这一步已验证
+   - 针对性测试通过：
+     config 阈值存在
+     baro 触发 reject
+     mag 触发 adaptive R
+   - 全量 unittest：46 项通过
+
+91. 今日第二十二步
+   - 把初始化从“黑箱成功/失败”推进成可诊断状态机
+   - 当前已新增：
+     初始化阶段
+     初始化原因
+     heading 来源
+     static alignment 状态
+
+92. 本步具体修改文件
+   - 02_src\eskf_stack\core\initialization.py
+   - 02_src\eskf_stack\core\__init__.py
+   - 02_src\eskf_stack\app.py
+   - 05_tests\test_app.py
+   - 01_data\配置说明.txt
+   - 00_说明\项目架构说明.txt
+   - 00_说明\README_先看我.txt
+
+93. 本步直接结果
+   - 当前初始化链路不再只是：
+     能不能初始化
+   - 现在会明确区分：
+     `WAITING_GNSS`
+     `WAITING_BOOTSTRAP_MOTION`
+     `READY_DIRECT_INIT`
+     `READY_BOOTSTRAP_INIT`
+     `INITIALIZED`
+   - 并且会记录：
+     `initialization_reason`
+     `heading_source`
+     `static_alignment_ready`
+     `static_alignment_reason`
+
+94. 这一步为什么重要
+   - 这一步吸收了外部建议里有价值的一点：
+     不要让初始化继续保持黑箱
+   - 但实现方式还是按我们自己的主线做：
+     不是重写滤波
+     而是先把初始化流程变成可解释状态
+   - 后面不管接真实日志还是做样例对比
+     都更容易知道系统卡在什么环节
+
+95. 当前这一步已验证
+   - 初始化状态相关测试通过：
+     等 GNSS
+     ready direct init
+     等 bootstrap motion
+   - 全量 unittest：49 项通过
+
+96. 今日第二十三步
+   - 给初始化状态机补等待超时和回退策略
+   - 当前已新增：
+     heading 等待超时
+     bootstrap 阈值配置化
+     zero yaw 回退开关
+
+97. 本步具体修改文件
+   - 02_src\eskf_stack\config.py
+   - 01_data\config.json
+   - 01_data\config_00000422_decoded.json
+   - 02_src\eskf_stack\core\initialization.py
+   - 02_src\eskf_stack\app.py
+   - 05_tests\test_app.py
+   - 05_tests\test_config.py
+   - 01_data\配置说明.txt
+   - 00_说明\项目架构说明.txt
+   - 00_说明\README_先看我.txt
+
+98. 本步直接结果
+   - 当前初始化不再默认无限等待 heading 来源
+   - 已支持：
+     `heading_wait_timeout_s`
+     `zero_yaw_fallback_enabled`
+   - 如果配置允许，
+     且等待超过阈值，
+     可以退化为：
+     `zero_yaw_fallback`
+     的 direct init
+   - 当前默认仍然关闭这条回退，
+     所以项目默认行为不会被激进改掉
+
+99. 这一步为什么重要
+   - 这一步把初始化从“有阶段”
+     推进到“有控制策略”
+   - 现在系统不仅会说：
+     我为什么还没初始化
+   - 还会说：
+     我最多等多久
+     超时后是否允许退化回退
+
+100. 当前这一步已验证
+   - 初始化相关测试新增通过：
+     timeout zero yaw fallback ready
+     timeout 后允许 direct init
+   - 全量 unittest：51 项通过
+
+101. 今日第二十四步
+   - 把初始化状态摘要正式接进 metrics / analysis
+   - 当前已新增运行级初始化指标：
+     `initialization_mode_direct_flag`
+     `initialization_mode_bootstrap_position_pair_flag`
+     `initialization_static_coarse_alignment_used_flag`
+     `initialization_static_alignment_ready_flag`
+     `initialization_zero_yaw_fallback_used_flag`
+     `initialization_wait_s`
+
+102. 本步具体修改文件
+   - 02_src\eskf_stack\analysis\evaluator.py
+   - 02_src\eskf_stack\app.py
+   - 05_tests\test_metrics.py
+
+103. 本步直接结果
+   - 初始化不再只是：
+     `dataset_source_summary.txt`
+     里的文本摘要
+   - 现在也能进入：
+     `metrics.csv`
+     `metrics_summary.txt`
+   - 这说明后面做实验对比时，
+     可以直接把初始化方式和等待时长纳入回归基线。
+
+104. 这一步为什么重要
+   - 初始化是单次运行级事件，
+     不适合伪装成逐时刻 `result_df` 序列。
+   - 所以这次采用的是：
+     保持 `result_df` 继续承载时序诊断
+     用 `initialization_summary` 承载运行级初始化语义
+     再由 `analysis` 统一吸收成 metrics
+   - 这样结构更清楚，
+     也更适合后面继续扩初始化质量指标。
+
+105. 当前这一步已验证
+   - `python -m unittest 05_tests.test_metrics` 通过
+   - `python -m unittest discover 05_tests` 通过
+   - 全量 unittest：52 项通过
+
+106. 今日第二十五步
+   - 补 `app` 级初始化闭环回归测试
+   - 当前新增覆盖：
+     direct 初始化
+     bootstrap_position_pair 初始化
+     zero yaw fallback
+     static coarse alignment used
+     初始化摘要和 metrics 一致性
+
+107. 本步具体修改文件
+   - 05_tests\test_app.py
+
+108. 本步直接结果
+   - 初始化这条线现在不只测：
+     “状态是否 ready”
+   - 还测：
+     “最终初始化摘要写了什么”
+     “metrics 标量是否一致”
+   - 这让初始化真正进入了结构化回归，而不是停在局部函数测试。
+
+109. 本步额外发现
+   - 如果测试里不补足默认要求的静止样本数，
+     `static coarse alignment`
+     会稳定停在：
+     `not_enough_static_samples`
+   - 因此针对 bootstrap + static alignment 的回归，
+     需要显式构造满足默认窗口条件的静止 IMU 样本。
+
+110. 当前这一步已验证
+   - `python -m unittest 05_tests.test_app` 通过
+   - `python -m unittest discover 05_tests` 通过
+   - 全量 unittest：54 项通过
+
+111. 今日第二十六步
+   - 把初始化分析输出从“只有裸 metric 键值”
+     推进为“人类可读初始化摘要 + metric 键值”
+   - 当前 `metrics_summary.txt`
+     顶部新增：
+     `Initialization Summary`
+   - 当前摘要包括：
+     phase
+     mode
+     reason
+     heading_source
+     static_coarse_alignment_used
+     static_alignment_ready
+     static_alignment_reason
+     zero_yaw_fallback_used
+     initialization_wait_s
+
+112. 本步具体修改文件
+   - 02_src\eskf_stack\analysis\evaluator.py
+   - 02_src\eskf_stack\app.py
+   - 05_tests\test_metrics.py
+   - 00_说明\README_先看我.txt
+   - 00_说明\项目架构说明.txt
+   - 01_data\配置说明.txt
+
+113. 本步直接结果
+   - 当前看结果时，
+     不需要先去翻：
+     `dataset_source_summary.txt`
+     再自己对应 metric 键名
+   - 现在在：
+     `metrics_summary.txt`
+     顶部就能直接看到这次初始化到底走的是：
+     direct
+     还是 bootstrap_position_pair
+   - 也能直接看到：
+     是否用了 static coarse alignment
+     是否触发了 zero yaw fallback
+     初始化前等待了多久
+
+114. 这一步为什么重要
+   - 这一步补的是“分析可读性”，
+     不是继续扩某个样例数据的专用参数。
+   - 初始化这类单次事件，
+     如果只保留裸指标，
+     后面看实验结果很容易忘记这次到底怎么起的滤波器。
+   - 现在 analysis 输出里已经把：
+     结构化回归
+     人类可读摘要
+     文档说明
+     这三层统一起来了。
+
+115. 当前这一步已验证
+   - 新增 `save_metrics` 初始化摘要测试通过
+   - `python -m unittest 05_tests.test_metrics` 通过
+   - `python -m unittest discover 05_tests` 通过
+   - 全量 unittest：55 项通过

@@ -48,6 +48,10 @@ class InitializationConfig:
     static_max_accel_std_mps2: float
     static_max_gyro_std_radps: float
     static_gravity_norm_tolerance_mps2: float
+    bootstrap_min_dt_s: float
+    bootstrap_min_horizontal_displacement_m: float
+    heading_wait_timeout_s: float
+    zero_yaw_fallback_enabled: bool
 
 
 @dataclass
@@ -63,6 +67,10 @@ class InnovationManagement:
     gnss_pos_nis_reject_threshold: float
     gnss_vel_nis_adapt_threshold: float
     gnss_vel_nis_reject_threshold: float
+    baro_nis_adapt_threshold: float
+    baro_nis_reject_threshold: float
+    mag_yaw_nis_adapt_threshold: float
+    mag_yaw_nis_reject_threshold: float
 
 
 @dataclass
@@ -154,6 +162,10 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
                     "static_max_accel_std_mps2": 0.25,
                     "static_max_gyro_std_radps": 0.03,
                     "static_gravity_norm_tolerance_mps2": 1.5,
+                    "bootstrap_min_dt_s": 0.15,
+                    "bootstrap_min_horizontal_displacement_m": 0.5,
+                    "heading_wait_timeout_s": 2.0,
+                    "zero_yaw_fallback_enabled": False,
                 },
             )
         ),

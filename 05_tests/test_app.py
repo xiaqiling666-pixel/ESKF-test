@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import sys
 import unittest
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "02_src"
@@ -12,10 +14,34 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from eskf_stack.adapters.csv_dataset import SensorFrame, diagnostic_truth_view, observation_view
+from eskf_stack.analysis.evaluator import compute_metrics
 from eskf_stack.core import ImuInitializationSample
-from eskf_stack.app import _bootstrap_initialize_from_position_pair, _initialize_filter
+from eskf_stack.app import _assess_initialization_status, _bootstrap_initialize_from_position_pair, _initialize_filter
 from eskf_stack.config import load_config
 from eskf_stack.core import OfflineESKF
+
+
+def _minimal_metrics_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "time": [0.0, 1.0],
+            "quality_score": [90.0, 92.0],
+            "used_gnss_pos": [1, 1],
+            "used_baro": [0, 0],
+            "used_mag": [0, 0],
+        }
+    )
+
+
+def _static_initialization_samples(sample_count: int = 50, dt_s: float = 0.02) -> list[ImuInitializationSample]:
+    return [
+        ImuInitializationSample(
+            time=index * dt_s,
+            accel=np.array([0.0, 0.0, 9.81], dtype=float),
+            gyro=np.zeros(3, dtype=float),
+        )
+        for index in range(sample_count)
+    ]
 
 
 class AppInitializationTests(unittest.TestCase):
@@ -63,6 +89,143 @@ class AppInitializationTests(unittest.TestCase):
         self.assertFalse(initialized)
         self.assertFalse(filter_engine.initialized)
 
+    def test_initialization_status_waits_for_gnss_when_position_missing(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        filter_engine = OfflineESKF(config)
+        frame = observation_view(
+            SensorFrame(
+                time=0.0,
+                accel=np.array([0.0, 0.0, -9.81], dtype=float),
+                gyro=np.zeros(3, dtype=float),
+                gnss_pos=None,
+                gnss_vel=np.array([1.0, 0.0, 0.0], dtype=float),
+                baro_h=None,
+                mag_yaw=0.2,
+                truth_pos=None,
+                truth_vel=None,
+                truth_yaw=None,
+            )
+        )
+
+        status, static_check = _assess_initialization_status(filter_engine, frame, [], None)
+
+        self.assertEqual(status.phase, "WAITING_GNSS")
+        self.assertEqual(status.reason, "no_gnss_position")
+        self.assertIsNone(static_check)
+
+    def test_initialization_status_reports_ready_direct_init(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        filter_engine = OfflineESKF(config)
+        samples = [
+            ImuInitializationSample(time=0.0, accel=np.array([0.0, 0.0, 9.81]), gyro=np.zeros(3)),
+            ImuInitializationSample(time=0.1, accel=np.array([0.0, 0.0, 9.81]), gyro=np.zeros(3)),
+        ]
+        frame = observation_view(
+            SensorFrame(
+                time=0.1,
+                accel=np.array([0.0, 0.0, -9.81], dtype=float),
+                gyro=np.zeros(3, dtype=float),
+                gnss_pos=np.array([1.0, 2.0, 3.0], dtype=float),
+                gnss_vel=np.array([0.3, 0.0, 0.0], dtype=float),
+                baro_h=None,
+                mag_yaw=None,
+                truth_pos=None,
+                truth_vel=None,
+                truth_yaw=None,
+            )
+        )
+
+        status, static_check = _assess_initialization_status(filter_engine, frame, samples, None)
+
+        self.assertEqual(status.phase, "READY_DIRECT_INIT")
+        self.assertEqual(status.ready_mode, "direct")
+        self.assertEqual(status.heading_source, "gnss_velocity_course")
+        self.assertIsNotNone(static_check)
+
+    def test_initialization_status_waits_for_bootstrap_motion_without_heading_source(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        filter_engine = OfflineESKF(config)
+        anchor_frame = observation_view(
+            SensorFrame(
+                time=0.0,
+                accel=np.array([0.0, 0.0, -9.81], dtype=float),
+                gyro=np.zeros(3, dtype=float),
+                gnss_pos=np.array([10.0, 20.0, 5.0], dtype=float),
+                gnss_vel=None,
+                baro_h=None,
+                mag_yaw=None,
+                truth_pos=None,
+                truth_vel=None,
+                truth_yaw=None,
+            )
+        )
+        frame = observation_view(
+            SensorFrame(
+                time=0.05,
+                accel=np.array([0.0, 0.0, -9.81], dtype=float),
+                gyro=np.zeros(3, dtype=float),
+                gnss_pos=np.array([10.1, 20.1, 5.0], dtype=float),
+                gnss_vel=None,
+                baro_h=None,
+                mag_yaw=None,
+                truth_pos=None,
+                truth_vel=None,
+                truth_yaw=None,
+            )
+        )
+
+        status, static_check = _assess_initialization_status(filter_engine, frame, [], anchor_frame)
+
+        self.assertEqual(status.phase, "WAITING_BOOTSTRAP_MOTION")
+        self.assertEqual(status.reason, "bootstrap_dt_too_short")
+        self.assertIsNone(static_check)
+
+    def test_initialization_status_can_enable_zero_yaw_timeout_fallback(self) -> None:
+        base_config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        init_config = replace(
+            base_config.initialization,
+            heading_wait_timeout_s=0.5,
+            zero_yaw_fallback_enabled=True,
+        )
+        config = replace(base_config, initialization=init_config)
+        filter_engine = OfflineESKF(config)
+        anchor_frame = observation_view(
+            SensorFrame(
+                time=0.0,
+                accel=np.array([0.0, 0.0, -9.81], dtype=float),
+                gyro=np.zeros(3, dtype=float),
+                gnss_pos=np.array([10.0, 20.0, 5.0], dtype=float),
+                gnss_vel=None,
+                baro_h=None,
+                mag_yaw=None,
+                truth_pos=None,
+                truth_vel=None,
+                truth_yaw=None,
+            )
+        )
+        frame = observation_view(
+            SensorFrame(
+                time=0.6,
+                accel=np.array([0.0, 0.0, -9.81], dtype=float),
+                gyro=np.zeros(3, dtype=float),
+                gnss_pos=np.array([10.0, 20.0, 5.0], dtype=float),
+                gnss_vel=None,
+                baro_h=None,
+                mag_yaw=None,
+                truth_pos=None,
+                truth_vel=None,
+                truth_yaw=None,
+            )
+        )
+
+        status, static_check = _assess_initialization_status(filter_engine, frame, [], anchor_frame)
+
+        self.assertEqual(status.phase, "READY_DIRECT_INIT")
+        self.assertEqual(status.reason, "heading_wait_timeout_zero_yaw_fallback")
+        self.assertEqual(status.heading_source, "zero_yaw_fallback")
+        self.assertAlmostEqual(status.wait_time_s, 0.6, places=9)
+        self.assertIsNotNone(static_check)
+
     def test_bootstrap_initialize_from_position_pair_estimates_velocity_and_yaw(self) -> None:
         config = load_config(PROJECT_ROOT / "01_data" / "config.json")
         filter_engine = OfflineESKF(config)
@@ -108,6 +271,158 @@ class AppInitializationTests(unittest.TestCase):
         self.assertTrue(np.allclose(filter_engine.state.position, [10.4, 20.8, 5.2]))
         self.assertTrue(np.allclose(filter_engine.state.velocity, [2.0, 4.0, 1.0]))
         self.assertAlmostEqual(filter_engine.state.quaternion[0], np.cos(np.arctan2(4.0, 2.0) / 2.0), places=6)
+
+    def test_initialize_filter_can_fallback_to_zero_yaw_after_timeout(self) -> None:
+        base_config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        init_config = replace(
+            base_config.initialization,
+            heading_wait_timeout_s=0.5,
+            zero_yaw_fallback_enabled=True,
+        )
+        config = replace(base_config, initialization=init_config)
+        filter_engine = OfflineESKF(config)
+        frame = SensorFrame(
+            time=0.6,
+            accel=np.array([0.0, 0.0, -9.81], dtype=float),
+            gyro=np.zeros(3, dtype=float),
+            gnss_pos=np.array([10.0, 20.0, 5.0], dtype=float),
+            gnss_vel=None,
+            baro_h=None,
+            mag_yaw=None,
+            truth_pos=None,
+            truth_vel=None,
+            truth_yaw=None,
+        )
+        anchor_frame = observation_view(
+            SensorFrame(
+                time=0.0,
+                accel=np.array([0.0, 0.0, -9.81], dtype=float),
+                gyro=np.zeros(3, dtype=float),
+                gnss_pos=np.array([10.0, 20.0, 5.0], dtype=float),
+                gnss_vel=None,
+                baro_h=None,
+                mag_yaw=None,
+                truth_pos=None,
+                truth_vel=None,
+                truth_yaw=None,
+            )
+        )
+
+        initialized = _initialize_filter(filter_engine, frame, [], {}, anchor_frame)
+
+        self.assertTrue(initialized)
+        self.assertTrue(filter_engine.initialized)
+        self.assertAlmostEqual(filter_engine.state.yaw, 0.0, places=9)
+
+    def test_direct_initialization_summary_matches_metrics_flags(self) -> None:
+        base_config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        init_config = replace(
+            base_config.initialization,
+            heading_wait_timeout_s=0.5,
+            zero_yaw_fallback_enabled=True,
+        )
+        config = replace(base_config, initialization=init_config)
+        filter_engine = OfflineESKF(config)
+        initialization_summary: dict[str, str] = {}
+        frame = SensorFrame(
+            time=0.6,
+            accel=np.array([0.0, 0.0, -9.81], dtype=float),
+            gyro=np.zeros(3, dtype=float),
+            gnss_pos=np.array([10.0, 20.0, 5.0], dtype=float),
+            gnss_vel=None,
+            baro_h=None,
+            mag_yaw=None,
+            truth_pos=None,
+            truth_vel=None,
+            truth_yaw=None,
+        )
+        anchor_frame = observation_view(
+            SensorFrame(
+                time=0.0,
+                accel=np.array([0.0, 0.0, -9.81], dtype=float),
+                gyro=np.zeros(3, dtype=float),
+                gnss_pos=np.array([10.0, 20.0, 5.0], dtype=float),
+                gnss_vel=None,
+                baro_h=None,
+                mag_yaw=None,
+                truth_pos=None,
+                truth_vel=None,
+                truth_yaw=None,
+            )
+        )
+
+        initialized = _initialize_filter(filter_engine, frame, [], initialization_summary, anchor_frame)
+
+        self.assertTrue(initialized)
+        self.assertEqual(initialization_summary["initialization_phase"], "INITIALIZED")
+        self.assertEqual(initialization_summary["initialization_reason"], "direct_init_completed")
+        self.assertEqual(initialization_summary["initialization_ready_mode"], "direct")
+        self.assertEqual(initialization_summary["heading_source"], "zero_yaw_fallback")
+        self.assertEqual(initialization_summary["static_coarse_alignment_used"], "false")
+        self.assertAlmostEqual(float(initialization_summary["initialization_wait_s"]), 0.6, places=9)
+
+        metrics = compute_metrics(_minimal_metrics_frame(), initialization_summary=initialization_summary)
+
+        self.assertEqual(metrics["initialization_completed_flag"], 1.0)
+        self.assertEqual(metrics["initialization_mode_direct_flag"], 1.0)
+        self.assertEqual(metrics["initialization_mode_bootstrap_position_pair_flag"], 0.0)
+        self.assertEqual(metrics["initialization_static_coarse_alignment_used_flag"], 0.0)
+        self.assertEqual(metrics["initialization_zero_yaw_fallback_used_flag"], 1.0)
+        self.assertAlmostEqual(metrics["initialization_wait_s"], 0.6, places=9)
+
+    def test_bootstrap_initialization_summary_matches_metrics_flags(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        filter_engine = OfflineESKF(config)
+        initialization_summary: dict[str, str] = {}
+        anchor_frame = SensorFrame(
+            time=0.0,
+            accel=np.array([0.0, 0.0, -9.81], dtype=float),
+            gyro=np.zeros(3, dtype=float),
+            gnss_pos=np.array([10.0, 20.0, 5.0], dtype=float),
+            gnss_vel=None,
+            baro_h=None,
+            mag_yaw=None,
+            truth_pos=None,
+            truth_vel=None,
+            truth_yaw=None,
+        )
+        frame = SensorFrame(
+            time=1.0,
+            accel=np.array([0.0, 0.0, -9.81], dtype=float),
+            gyro=np.zeros(3, dtype=float),
+            gnss_pos=np.array([12.0, 24.0, 6.0], dtype=float),
+            gnss_vel=None,
+            baro_h=None,
+            mag_yaw=None,
+            truth_pos=None,
+            truth_vel=None,
+            truth_yaw=None,
+        )
+
+        initialized = _bootstrap_initialize_from_position_pair(
+            filter_engine,
+            anchor_frame,
+            frame,
+            _static_initialization_samples(),
+            initialization_summary,
+        )
+
+        self.assertTrue(initialized)
+        self.assertEqual(initialization_summary["initialization_phase"], "INITIALIZED")
+        self.assertEqual(initialization_summary["initialization_reason"], "bootstrap_init_completed")
+        self.assertEqual(initialization_summary["initialization_ready_mode"], "bootstrap_position_pair")
+        self.assertEqual(initialization_summary["heading_source"], "position_pair_course")
+        self.assertEqual(initialization_summary["static_coarse_alignment_used"], "true")
+        self.assertAlmostEqual(float(initialization_summary["initialization_wait_s"]), 1.0, places=9)
+
+        metrics = compute_metrics(_minimal_metrics_frame(), initialization_summary=initialization_summary)
+
+        self.assertEqual(metrics["initialization_completed_flag"], 1.0)
+        self.assertEqual(metrics["initialization_mode_direct_flag"], 0.0)
+        self.assertEqual(metrics["initialization_mode_bootstrap_position_pair_flag"], 1.0)
+        self.assertEqual(metrics["initialization_static_coarse_alignment_used_flag"], 1.0)
+        self.assertEqual(metrics["initialization_zero_yaw_fallback_used_flag"], 0.0)
+        self.assertAlmostEqual(metrics["initialization_wait_s"], 1.0, places=9)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -12,7 +13,7 @@ SRC_ROOT = PROJECT_ROOT / "02_src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from eskf_stack.analysis.evaluator import compute_metrics
+from eskf_stack.analysis.evaluator import compute_metrics, save_metrics
 
 
 class MetricsTests(unittest.TestCase):
@@ -94,6 +95,70 @@ class MetricsTests(unittest.TestCase):
         self.assertAlmostEqual(metrics["max_dt_applied_s"], 0.02, places=9)
         self.assertAlmostEqual(metrics["predict_reason_duration_applied_s"], 4.0, places=9)
         self.assertAlmostEqual(metrics["predict_reason_duration_above_max_dt_skipped_s"], 1.0, places=9)
+
+    def test_initialization_summary_metrics(self) -> None:
+        result_df = pd.DataFrame(
+            {
+                "time": [0.0, 1.0],
+                "quality_score": [90.0, 92.0],
+                "used_gnss_pos": [1, 1],
+                "used_baro": [0, 0],
+                "used_mag": [0, 0],
+            }
+        )
+
+        initialization_summary = {
+            "initialization_mode": "direct_static_coarse_alignment",
+            "initialization_phase": "INITIALIZED",
+            "initialization_ready_mode": "direct",
+            "heading_source": "zero_yaw_fallback",
+            "static_coarse_alignment_used": "true",
+            "static_alignment_ready": "true",
+            "initialization_wait_s": "1.500000",
+        }
+
+        metrics = compute_metrics(result_df, initialization_summary=initialization_summary)
+
+        self.assertEqual(metrics["initialization_completed_flag"], 1.0)
+        self.assertEqual(metrics["initialization_mode_direct_flag"], 1.0)
+        self.assertEqual(metrics["initialization_mode_bootstrap_position_pair_flag"], 0.0)
+        self.assertEqual(metrics["initialization_static_coarse_alignment_used_flag"], 1.0)
+        self.assertEqual(metrics["initialization_static_alignment_ready_flag"], 1.0)
+        self.assertEqual(metrics["initialization_zero_yaw_fallback_used_flag"], 1.0)
+        self.assertAlmostEqual(metrics["initialization_wait_s"], 1.5, places=9)
+
+    def test_save_metrics_writes_human_readable_initialization_summary(self) -> None:
+        metrics = {
+            "initialization_mode_direct_flag": 1.0,
+            "initialization_zero_yaw_fallback_used_flag": 1.0,
+            "initialization_wait_s": 1.5,
+        }
+        initialization_summary = {
+            "initialization_phase": "INITIALIZED",
+            "initialization_reason": "direct_init_completed",
+            "initialization_ready_mode": "direct",
+            "heading_source": "zero_yaw_fallback",
+            "static_coarse_alignment_used": "false",
+            "static_alignment_ready": "true",
+            "static_alignment_reason": "static_alignment_ready",
+            "initialization_wait_s": "1.500000",
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            save_metrics(metrics, output_dir, initialization_summary=initialization_summary)
+            summary_text = (output_dir / "metrics_summary.txt").read_text(encoding="utf-8")
+
+        self.assertIn("Initialization Summary", summary_text)
+        self.assertIn("phase: INITIALIZED", summary_text)
+        self.assertIn("mode: direct", summary_text)
+        self.assertIn("reason: direct_init_completed", summary_text)
+        self.assertIn("heading_source: zero_yaw_fallback", summary_text)
+        self.assertIn("static_coarse_alignment_used: no", summary_text)
+        self.assertIn("static_alignment_ready: yes", summary_text)
+        self.assertIn("zero_yaw_fallback_used: yes", summary_text)
+        self.assertIn("initialization_wait_s: 1.500000", summary_text)
+        self.assertIn("Metric Values", summary_text)
 
 
 if __name__ == "__main__":

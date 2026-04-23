@@ -4,7 +4,7 @@ import numpy as np
 
 from ..core.math_utils import quat_multiply, quat_normalize, quat_to_euler, rotvec_to_quat, wrap_angle
 from ..core.state import ERROR_STATE, ERROR_STATE_DIM
-from .base import MeasurementModel, MeasurementUpdate
+from .base import MeasurementModel, MeasurementPolicy, MeasurementUpdate
 
 
 def _yaw_error_jacobian(filter_engine) -> np.ndarray:
@@ -26,6 +26,13 @@ class MagYawMeasurement(MeasurementModel):
 
     def is_available(self, frame) -> bool:
         return frame.mag_yaw is not None
+
+    def policy(self, filter_engine) -> MeasurementPolicy:
+        thresholds = filter_engine.config.innovation_management
+        return MeasurementPolicy(
+            adapt_threshold=thresholds.mag_yaw_nis_adapt_threshold,
+            reject_threshold=thresholds.mag_yaw_nis_reject_threshold,
+        )
 
     def build_update(self, filter_engine, frame) -> MeasurementUpdate | None:
         if frame.mag_yaw is None:

@@ -22,6 +22,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(Path(config.config_path).resolve(), DEFAULT_CONFIG_PATH.resolve())
         self.assertTrue(config.initialization.static_coarse_alignment_enabled)
         self.assertGreater(config.time_step_management.max_dt_s, config.time_step_management.min_positive_dt_s)
+        self.assertGreater(config.initialization.heading_wait_timeout_s, 0.0)
+        self.assertFalse(config.initialization.zero_yaw_fallback_enabled)
+        self.assertGreater(config.innovation_management.baro_nis_reject_threshold, 0.0)
+        self.assertGreater(config.innovation_management.mag_yaw_nis_reject_threshold, 0.0)
 
     def test_sample_config_uses_non_default_profile(self) -> None:
         config = load_config(PROJECT_ROOT / "01_data" / "config_00000422_decoded.json")
@@ -29,7 +33,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.config_metadata.profile, "sample_validation")
         self.assertNotEqual(Path(config.config_path).resolve(), DEFAULT_CONFIG_PATH.resolve())
         self.assertGreater(config.initialization.static_window_min_samples, 0)
+        self.assertGreater(config.initialization.bootstrap_min_dt_s, 0.0)
         self.assertTrue(config.time_step_management.skip_large_dt)
+        self.assertGreater(config.innovation_management.baro_nis_adapt_threshold, 0.0)
+        self.assertGreater(config.innovation_management.mag_yaw_nis_adapt_threshold, 0.0)
 
     def test_non_default_config_cannot_claim_default_general_profile(self) -> None:
         payload = json.loads((PROJECT_ROOT / "01_data" / "config_00000422_decoded.json").read_text(encoding="utf-8"))

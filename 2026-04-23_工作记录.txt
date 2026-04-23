@@ -1,0 +1,122 @@
+日期
+2026-04-23
+
+项目
+ESKF离线融合项目
+
+今日主线
+继续沿“把项目框架搭对”的主线推进，
+没有回到 demo 专用分析，
+也没有围绕单个样例数据继续做专用优化。
+
+今日完成内容
+1. 初始化等待控制收口
+   - 已支持：
+     `heading_wait_timeout_s`
+     `zero_yaw_fallback_enabled`
+   - 默认仍关闭 `zero_yaw` 回退
+   - 初始化链路现在不仅有阶段状态，
+     也有等待超时和退化控制能力
+
+2. 初始化摘要正式接入 metrics / analysis
+   - 已把初始化运行级信息接入：
+     `metrics.csv`
+     `metrics_summary.txt`
+   - 当前已新增运行级初始化指标：
+     `initialization_completed_flag`
+     `initialization_mode_direct_flag`
+     `initialization_mode_bootstrap_position_pair_flag`
+     `initialization_static_coarse_alignment_used_flag`
+     `initialization_static_alignment_ready_flag`
+     `initialization_zero_yaw_fallback_used_flag`
+     `initialization_wait_s`
+
+3. 初始化闭环回归测试补齐
+   - 已新增 `app` 级测试覆盖：
+     direct 初始化
+     bootstrap_position_pair 初始化
+     zero yaw fallback
+     static coarse alignment used
+     初始化摘要与 metrics 一致性
+
+4. 初始化分析输出可读性增强
+   - `metrics_summary.txt`
+     顶部新增：
+     `Initialization Summary`
+   - 当前可直接读出：
+     phase
+     mode
+     reason
+     heading_source
+     static_coarse_alignment_used
+     static_alignment_ready
+     static_alignment_reason
+     zero_yaw_fallback_used
+     initialization_wait_s
+
+5. 文档同步更新
+   - 已同步更新：
+     `00_说明\README_先看我.txt`
+     `00_说明\项目架构说明.txt`
+     `01_data\配置说明.txt`
+     `2026-04-23_工作记录草稿.txt`
+
+本次主要改动文件
+1. 代码
+   - `02_src\eskf_stack\analysis\evaluator.py`
+   - `02_src\eskf_stack\app.py`
+
+2. 测试
+   - `05_tests\test_metrics.py`
+   - `05_tests\test_app.py`
+
+3. 文档
+   - `00_说明\README_先看我.txt`
+   - `00_说明\项目架构说明.txt`
+   - `01_data\配置说明.txt`
+   - `2026-04-23_工作记录草稿.txt`
+
+今日验证
+1. 已执行：
+   `python -m unittest 05_tests.test_metrics`
+2. 已执行：
+   `python -m unittest 05_tests.test_app`
+3. 已执行：
+   `python -m unittest discover 05_tests`
+4. 当前结果：
+   全量 `55` 项通过
+
+今日发现
+1. 初始化属于单次运行级事件，
+   不适合伪装成逐时刻 `result_df` 序列。
+2. 更合理的结构是：
+   `result_df`
+   继续承载时序诊断，
+   `initialization_summary`
+   承载运行级初始化语义，
+   再由 `analysis`
+   统一吸收成 metrics 和可读摘要。
+3. 如果测试里不补足静止样本数，
+   `static coarse alignment`
+   会稳定停在：
+   `not_enough_static_samples`
+   因此 bootstrap + static alignment 回归
+   需要显式构造满足默认窗口条件的静止 IMU 样本。
+
+当前阶段结论
+1. 初始化已经不再只是摘要文本，
+   现在已经进入：
+   指标统计
+   分析输出
+   回归测试
+2. 当前项目仍然是研究原型，
+   不是实机工程版。
+3. 今日工作继续服务于项目主线：
+   固化框架边界
+   提高可诊断性
+   提高可回归性
+
+今日收尾状态
+1. 未额外跑主入口
+2. 未新增结果文件污染
+3. 今日日志已生成

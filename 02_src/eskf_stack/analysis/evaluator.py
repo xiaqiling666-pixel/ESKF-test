@@ -9,6 +9,106 @@ from ..core.math_utils import wrap_angle
 from .truth_access import has_diagnostic_truth, truth_position_columns, truth_velocity_columns, truth_yaw_column
 
 
+def _parse_bool_flag(value: object) -> float | None:
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes"}:
+        return 1.0
+    if text in {"false", "0", "no", ""}:
+        return 0.0
+    return None
+
+
+def _add_initialization_metrics(metrics: dict[str, float], initialization_summary: dict[str, object] | None) -> None:
+    if not initialization_summary:
+        return
+
+    ready_mode = str(initialization_summary.get("initialization_ready_mode", "")).strip()
+    if not ready_mode:
+        initialization_mode = str(initialization_summary.get("initialization_mode", "")).strip()
+        if initialization_mode.startswith("direct"):
+            ready_mode = "direct"
+        elif initialization_mode.startswith("bootstrap_position_pair"):
+            ready_mode = "bootstrap_position_pair"
+
+    metrics["initialization_completed_flag"] = float(
+        str(initialization_summary.get("initialization_phase", "")).strip() == "INITIALIZED"
+    )
+    metrics["initialization_mode_direct_flag"] = float(ready_mode == "direct")
+    metrics["initialization_mode_bootstrap_position_pair_flag"] = float(ready_mode == "bootstrap_position_pair")
+
+    static_alignment_used = _parse_bool_flag(initialization_summary.get("static_coarse_alignment_used", ""))
+    if static_alignment_used is not None:
+        metrics["initialization_static_coarse_alignment_used_flag"] = static_alignment_used
+
+    static_alignment_ready = _parse_bool_flag(initialization_summary.get("static_alignment_ready", ""))
+    if static_alignment_ready is not None:
+        metrics["initialization_static_alignment_ready_flag"] = static_alignment_ready
+
+    metrics["initialization_zero_yaw_fallback_used_flag"] = float(
+        str(initialization_summary.get("heading_source", "")).strip() == "zero_yaw_fallback"
+    )
+
+    wait_time = initialization_summary.get("initialization_wait_s")
+    if wait_time is not None:
+        metrics["initialization_wait_s"] = float(wait_time)
+
+
+def _normalise_initialization_mode(initialization_summary: dict[str, object]) -> str:
+    ready_mode = str(initialization_summary.get("initialization_ready_mode", "")).strip()
+    if ready_mode:
+        return ready_mode
+
+    initialization_mode = str(initialization_summary.get("initialization_mode", "")).strip()
+    if initialization_mode.startswith("direct"):
+        return "direct"
+    if initialization_mode.startswith("bootstrap_position_pair"):
+        return "bootstrap_position_pair"
+    return initialization_mode
+
+
+def _format_initialization_summary(initialization_summary: dict[str, object] | None) -> list[str]:
+    if not initialization_summary:
+        return []
+
+    phase = str(initialization_summary.get("initialization_phase", "")).strip() or "unknown"
+    mode = _normalise_initialization_mode(initialization_summary) or "unknown"
+    heading_source = str(initialization_summary.get("heading_source", "")).strip() or "unknown"
+    reason = str(initialization_summary.get("initialization_reason", "")).strip() or "unknown"
+    static_alignment_reason = str(initialization_summary.get("static_alignment_reason", "")).strip() or "unknown"
+
+    static_alignment_used = _parse_bool_flag(initialization_summary.get("static_coarse_alignment_used", ""))
+    static_alignment_ready = _parse_bool_flag(initialization_summary.get("static_alignment_ready", ""))
+    zero_yaw_fallback_used = heading_source == "zero_yaw_fallback"
+
+    static_alignment_used_text = "unknown"
+    if static_alignment_used == 1.0:
+        static_alignment_used_text = "yes"
+    elif static_alignment_used == 0.0:
+        static_alignment_used_text = "no"
+
+    static_alignment_ready_text = "unknown"
+    if static_alignment_ready == 1.0:
+        static_alignment_ready_text = "yes"
+    elif static_alignment_ready == 0.0:
+        static_alignment_ready_text = "no"
+
+    lines = ["Initialization Summary", ""]
+    lines.append(f"phase: {phase}")
+    lines.append(f"mode: {mode}")
+    lines.append(f"reason: {reason}")
+    lines.append(f"heading_source: {heading_source}")
+    lines.append(f"static_coarse_alignment_used: {static_alignment_used_text}")
+    lines.append(f"static_alignment_ready: {static_alignment_ready_text}")
+    lines.append(f"static_alignment_reason: {static_alignment_reason}")
+    lines.append(f"zero_yaw_fallback_used: {'yes' if zero_yaw_fallback_used else 'no'}")
+
+    wait_time = initialization_summary.get("initialization_wait_s")
+    if wait_time is not None:
+        lines.append(f"initialization_wait_s: {float(wait_time):.6f}")
+
+    return lines
+
+
 def _sample_durations(time_series: pd.Series) -> pd.Series:
     if len(time_series) <= 1:
         return pd.Series([0.0] * len(time_series), index=time_series.index, dtype=float)
@@ -47,7 +147,10 @@ def _add_categorical_duration_metrics(
             metrics[f"{prefix}_share_{category_name}_pct"] = 100.0 * category_duration / total_duration
 
 
-def compute_metrics(result_df: pd.DataFrame) -> dict[str, float]:
+def compute_metrics(
+    result_df: pd.DataFrame,
+    initialization_summary: dict[str, object] | None = None,
+) -> dict[str, float]:
     metrics: dict[str, float] = {}
     if has_diagnostic_truth(result_df):
         position_error = result_df[["est_x", "est_y", "est_z"]].to_numpy() - result_df[list(truth_position_columns())].to_numpy()
@@ -131,16 +234,27 @@ def compute_metrics(result_df: pd.DataFrame) -> dict[str, float]:
         if "time" in result_df.columns and len(result_df) > 1:
             time_step = result_df["time"].diff().fillna(0.0)
             metrics["pending_duration_s"] = float(time_step[pending_series].sum())
+    _add_initialization_metrics(metrics, initialization_summary)
     return metrics
 
 
-def save_metrics(metrics: dict[str, float], output_dir: Path) -> None:
+def save_metrics(
+    metrics: dict[str, float],
+    output_dir: Path,
+    initialization_summary: dict[str, object] | None = None,
+) -> None:
     metrics_frame = pd.DataFrame(
         [{"metric": metric_name, "value": metric_value} for metric_name, metric_value in metrics.items()]
     )
     metrics_frame.to_csv(output_dir / "metrics.csv", index=False)
 
     lines = ["ESKF demo metrics", ""]
+    initialization_lines = _format_initialization_summary(initialization_summary)
+    if initialization_lines:
+        lines.extend(initialization_lines)
+        lines.append("")
+        lines.append("Metric Values")
+        lines.append("")
     for metric_name, metric_value in metrics.items():
         lines.append(f"{metric_name}: {metric_value:.6f}")
     (output_dir / "metrics_summary.txt").write_text("\n".join(lines), encoding="utf-8")

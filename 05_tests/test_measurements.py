@@ -12,7 +12,9 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from eskf_stack.adapters.csv_dataset import ObservationFrame
+from eskf_stack.config import load_config
 from eskf_stack.core.state import ERROR_STATE_DIM
+from eskf_stack.measurements import BarometerMeasurement, MagYawMeasurement
 from eskf_stack.measurements.base import MeasurementModel, MeasurementPolicy, MeasurementUpdate
 from eskf_stack.measurements.manager import MeasurementManager
 
@@ -28,6 +30,21 @@ class DummyFilter:
         self.last_residual = residual
         self.last_H = H
         self.last_R = R
+
+
+class PhysicalDummyFilter(DummyFilter):
+    def __init__(self, config) -> None:
+        super().__init__()
+        self.config = config
+        self.state = type(
+            "State",
+            (),
+            {
+                "position": np.zeros(3, dtype=float),
+                "velocity": np.zeros(3, dtype=float),
+                "quaternion": np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+            },
+        )()
 
 
 class DummyMeasurement(MeasurementModel):
@@ -57,6 +74,7 @@ class DummyMeasurement(MeasurementModel):
 
 class MeasurementManagerTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.config = load_config(PROJECT_ROOT / "01_data" / "config.json")
         self.frame = ObservationFrame(
             time=0.0,
             gnss_pos=None,
@@ -129,6 +147,41 @@ class MeasurementManagerTests(unittest.TestCase):
         self.assertAlmostEqual(first.recovery_scale, 3.0, places=6)
         self.assertAlmostEqual(second.recovery_scale, 2.0, places=6)
         self.assertAlmostEqual(third.recovery_scale, 1.0, places=6)
+
+    def test_barometer_measurement_uses_manager_rejection_policy(self) -> None:
+        filter_engine = PhysicalDummyFilter(self.config)
+        frame = ObservationFrame(
+            time=0.0,
+            gnss_pos=None,
+            gnss_vel=None,
+            baro_h=20.0,
+            mag_yaw=None,
+        )
+
+        result = self.manager.process(filter_engine, BarometerMeasurement(), frame)
+
+        self.assertTrue(result.available)
+        self.assertFalse(result.used)
+        self.assertTrue(result.rejected)
+        self.assertEqual(result.management_mode, "reject")
+
+    def test_mag_yaw_measurement_uses_manager_adaptive_policy(self) -> None:
+        filter_engine = PhysicalDummyFilter(self.config)
+        frame = ObservationFrame(
+            time=0.0,
+            gnss_pos=None,
+            gnss_vel=None,
+            baro_h=None,
+            mag_yaw=np.deg2rad(7.0),
+        )
+
+        result = self.manager.process(filter_engine, MagYawMeasurement(), frame)
+
+        self.assertTrue(result.available)
+        self.assertTrue(result.used)
+        self.assertFalse(result.rejected)
+        self.assertGreater(result.nis, self.config.innovation_management.mag_yaw_nis_adapt_threshold)
+        self.assertGreater(result.applied_r_scale, 1.0)
 
 
 if __name__ == "__main__":

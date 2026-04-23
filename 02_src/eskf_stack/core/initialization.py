@@ -29,6 +29,30 @@ class StaticAlignmentEstimate:
     gyro_std_norm: float
 
 
+@dataclass(frozen=True)
+class StaticAlignmentCheck:
+    enabled: bool
+    ready: bool
+    reason: str
+    sample_count: int
+    duration_s: float
+    accel_std_norm: float | None = None
+    gyro_std_norm: float | None = None
+    gravity_norm_error: float | None = None
+    estimate: StaticAlignmentEstimate | None = None
+
+
+@dataclass(frozen=True)
+class InitializationStatus:
+    phase: str
+    reason: str
+    ready_mode: str | None
+    heading_source: str
+    static_alignment_ready: bool
+    static_alignment_reason: str
+    wait_time_s: float = 0.0
+
+
 class StaticCoarseInitializer:
     def __init__(self, config: InitializationConfig) -> None:
         self.config = config
@@ -46,7 +70,7 @@ class StaticCoarseInitializer:
             return []
         return window
 
-    def estimate(
+    def assess(
         self,
         samples: list[ImuInitializationSample],
         position: np.ndarray,
@@ -54,13 +78,27 @@ class StaticCoarseInitializer:
         use_wgs84_gravity: bool,
         use_earth_rotation: bool,
         yaw: float,
-    ) -> StaticAlignmentEstimate | None:
+    ) -> StaticAlignmentCheck:
         if not self.config.static_coarse_alignment_enabled:
-            return None
+            return StaticAlignmentCheck(
+                enabled=False,
+                ready=False,
+                reason="static_alignment_disabled",
+                sample_count=0,
+                duration_s=0.0,
+            )
 
         stationary_window = self._select_stationary_window(samples)
         if not stationary_window:
-            return None
+            sample_count = len(samples)
+            duration_s = 0.0 if len(samples) < 2 else float(samples[-1].time - samples[0].time)
+            return StaticAlignmentCheck(
+                enabled=True,
+                ready=False,
+                reason="not_enough_static_samples",
+                sample_count=sample_count,
+                duration_s=duration_s,
+            )
 
         accel_samples = np.vstack([sample.accel for sample in stationary_window])
         gyro_samples = np.vstack([sample.gyro for sample in stationary_window])
@@ -68,11 +106,28 @@ class StaticCoarseInitializer:
         gyro_mean = gyro_samples.mean(axis=0)
         accel_std_norm = float(np.linalg.norm(accel_samples.std(axis=0)))
         gyro_std_norm = float(np.linalg.norm(gyro_samples.std(axis=0)))
+        duration_s = float(stationary_window[-1].time - stationary_window[0].time)
 
         if accel_std_norm > self.config.static_max_accel_std_mps2:
-            return None
+            return StaticAlignmentCheck(
+                enabled=True,
+                ready=False,
+                reason="accel_not_stationary",
+                sample_count=len(stationary_window),
+                duration_s=duration_s,
+                accel_std_norm=accel_std_norm,
+                gyro_std_norm=gyro_std_norm,
+            )
         if gyro_std_norm > self.config.static_max_gyro_std_radps:
-            return None
+            return StaticAlignmentCheck(
+                enabled=True,
+                ready=False,
+                reason="gyro_not_stationary",
+                sample_count=len(stationary_window),
+                duration_s=duration_s,
+                accel_std_norm=accel_std_norm,
+                gyro_std_norm=gyro_std_norm,
+            )
 
         static_environment = resolve_local_navigation_environment(
             base_environment,
@@ -83,8 +138,18 @@ class StaticCoarseInitializer:
         )
         expected_specific_force_nav = -static_environment.gravity_vector
         expected_specific_force_norm = float(np.linalg.norm(expected_specific_force_nav))
-        if abs(float(np.linalg.norm(accel_mean)) - expected_specific_force_norm) > self.config.static_gravity_norm_tolerance_mps2:
-            return None
+        gravity_norm_error = abs(float(np.linalg.norm(accel_mean)) - expected_specific_force_norm)
+        if gravity_norm_error > self.config.static_gravity_norm_tolerance_mps2:
+            return StaticAlignmentCheck(
+                enabled=True,
+                ready=False,
+                reason="gravity_norm_mismatch",
+                sample_count=len(stationary_window),
+                duration_s=duration_s,
+                accel_std_norm=accel_std_norm,
+                gyro_std_norm=gyro_std_norm,
+                gravity_norm_error=gravity_norm_error,
+            )
 
         horizontal_force = float(np.hypot(accel_mean[1], accel_mean[2]))
         roll = float(np.arctan2(accel_mean[1], accel_mean[2]))
@@ -95,8 +160,7 @@ class StaticCoarseInitializer:
         expected_specific_force_body = rotation.T @ expected_specific_force_nav
         expected_nav_rate_body = rotation.T @ static_environment.omega_in_nav
 
-        duration_s = float(stationary_window[-1].time - stationary_window[0].time)
-        return StaticAlignmentEstimate(
+        estimate = StaticAlignmentEstimate(
             roll=roll,
             pitch=pitch,
             yaw=float(yaw),
@@ -107,3 +171,33 @@ class StaticCoarseInitializer:
             accel_std_norm=accel_std_norm,
             gyro_std_norm=gyro_std_norm,
         )
+        return StaticAlignmentCheck(
+            enabled=True,
+            ready=True,
+            reason="static_alignment_ready",
+            sample_count=len(stationary_window),
+            duration_s=duration_s,
+            accel_std_norm=accel_std_norm,
+            gyro_std_norm=gyro_std_norm,
+            gravity_norm_error=gravity_norm_error,
+            estimate=estimate,
+        )
+
+    def estimate(
+        self,
+        samples: list[ImuInitializationSample],
+        position: np.ndarray,
+        base_environment: LocalNavigationEnvironment,
+        use_wgs84_gravity: bool,
+        use_earth_rotation: bool,
+        yaw: float,
+    ) -> StaticAlignmentEstimate | None:
+        check = self.assess(
+            samples,
+            position=position,
+            base_environment=base_environment,
+            use_wgs84_gravity=use_wgs84_gravity,
+            use_earth_rotation=use_earth_rotation,
+            yaw=yaw,
+        )
+        return check.estimate

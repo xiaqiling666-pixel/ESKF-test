@@ -31,7 +31,7 @@ from .analysis.quality import (
 )
 from .analysis.state_machine import ModeStateTracker, determine_mode
 from .config import load_config, project_path
-from .core import ImuInitializationSample, OfflineESKF, StaticCoarseInitializer
+from .core import ImuInitializationSample, InitializationStatus, OfflineESKF, StaticAlignmentCheck, StaticCoarseInitializer
 from .core.math_utils import ensure_dir, quat_to_euler
 from .core.state import ERROR_STATE
 from .measurements import (
@@ -66,24 +66,193 @@ def _resolve_initial_yaw(frame) -> float:
     return 0.0
 
 
+def _resolve_heading_source(frame) -> tuple[float | None, str]:
+    if frame.mag_yaw is not None:
+        return float(frame.mag_yaw), "mag_yaw"
+    if frame.gnss_vel is not None and float(np.linalg.norm(frame.gnss_vel[:2])) > 1e-6:
+        return float(np.arctan2(frame.gnss_vel[1], frame.gnss_vel[0])), "gnss_velocity_course"
+    return None, "none"
+
+
 def _preinit_sample_from_frame(frame) -> ImuInitializationSample:
     return ImuInitializationSample(time=float(frame.time), accel=frame.accel.copy(), gyro=frame.gyro.copy())
 
 
-def _try_static_coarse_alignment(
+def _assess_static_coarse_alignment(
     filter_engine: OfflineESKF,
     initialization_samples: list[ImuInitializationSample],
     alignment_position: np.ndarray,
     yaw: float,
-):
+) -> StaticAlignmentCheck:
     initializer = StaticCoarseInitializer(filter_engine.config.initialization)
-    return initializer.estimate(
+    return initializer.assess(
         initialization_samples,
         position=alignment_position,
         base_environment=filter_engine.navigation_environment,
         use_wgs84_gravity=filter_engine.config.navigation_environment.use_wgs84_gravity,
         use_earth_rotation=filter_engine.config.navigation_environment.use_earth_rotation,
         yaw=yaw,
+    )
+
+
+def _summarize_initialization_status(
+    status: InitializationStatus,
+    initialization_summary: dict[str, Any],
+) -> None:
+    initialization_summary.update(
+        {
+            "initialization_phase": status.phase,
+            "initialization_reason": status.reason,
+            "initialization_ready_mode": "" if status.ready_mode is None else status.ready_mode,
+            "heading_source": status.heading_source,
+            "static_alignment_ready": "true" if status.static_alignment_ready else "false",
+            "static_alignment_reason": status.static_alignment_reason,
+            "initialization_wait_s": f"{status.wait_time_s:.6f}",
+        }
+    )
+
+
+def _assess_initialization_status(
+    filter_engine: OfflineESKF,
+    frame,
+    initialization_samples: list[ImuInitializationSample],
+    bootstrap_anchor_frame,
+) -> tuple[InitializationStatus, StaticAlignmentCheck | None]:
+    init_config = filter_engine.config.initialization
+    if filter_engine.initialized:
+        return (
+            InitializationStatus(
+                phase="INITIALIZED",
+                reason="already_initialized",
+                ready_mode=None,
+                heading_source="n/a",
+                static_alignment_ready=False,
+                static_alignment_reason="n/a",
+                wait_time_s=0.0,
+            ),
+            None,
+        )
+
+    if frame.gnss_pos is None:
+        return (
+            InitializationStatus(
+                phase="WAITING_GNSS",
+                reason="no_gnss_position",
+                ready_mode=None,
+                heading_source="none",
+                static_alignment_ready=False,
+                static_alignment_reason="not_evaluated",
+                wait_time_s=0.0,
+            ),
+            None,
+        )
+
+    yaw, heading_source = _resolve_heading_source(frame)
+    if yaw is not None:
+        static_check = _assess_static_coarse_alignment(
+            filter_engine,
+            initialization_samples,
+            frame.gnss_pos,
+            yaw,
+        )
+        return (
+            InitializationStatus(
+                phase="READY_DIRECT_INIT",
+                reason="direct_init_prerequisites_met",
+                ready_mode="direct",
+                heading_source=heading_source,
+                static_alignment_ready=static_check.ready,
+                static_alignment_reason=static_check.reason,
+                wait_time_s=0.0,
+            ),
+            static_check,
+        )
+
+    if bootstrap_anchor_frame is None or bootstrap_anchor_frame.gnss_pos is None:
+        return (
+            InitializationStatus(
+                phase="WAITING_BOOTSTRAP_MOTION",
+                reason="awaiting_bootstrap_anchor",
+                ready_mode=None,
+                heading_source="none",
+                static_alignment_ready=False,
+                static_alignment_reason="heading_not_available",
+                wait_time_s=0.0,
+            ),
+            None,
+        )
+
+    dt = float(frame.time - bootstrap_anchor_frame.time)
+    if init_config.zero_yaw_fallback_enabled and dt >= init_config.heading_wait_timeout_s:
+        yaw = 0.0
+        static_check = _assess_static_coarse_alignment(
+            filter_engine,
+            initialization_samples,
+            bootstrap_anchor_frame.gnss_pos,
+            yaw,
+        )
+        return (
+            InitializationStatus(
+                phase="READY_DIRECT_INIT",
+                reason="heading_wait_timeout_zero_yaw_fallback",
+                ready_mode="direct",
+                heading_source="zero_yaw_fallback",
+                static_alignment_ready=static_check.ready,
+                static_alignment_reason=static_check.reason,
+                wait_time_s=dt,
+            ),
+            static_check,
+        )
+
+    if dt < init_config.bootstrap_min_dt_s:
+        return (
+            InitializationStatus(
+                phase="WAITING_BOOTSTRAP_MOTION",
+                reason="bootstrap_dt_too_short",
+                ready_mode=None,
+                heading_source="none",
+                static_alignment_ready=False,
+                static_alignment_reason="heading_not_available",
+                wait_time_s=dt,
+            ),
+            None,
+        )
+
+    displacement = frame.gnss_pos - bootstrap_anchor_frame.gnss_pos
+    horizontal_displacement = float(np.linalg.norm(displacement[:2]))
+    if horizontal_displacement < init_config.bootstrap_min_horizontal_displacement_m:
+        return (
+            InitializationStatus(
+                phase="WAITING_BOOTSTRAP_MOTION",
+                reason="bootstrap_displacement_too_small",
+                ready_mode=None,
+                heading_source="none",
+                static_alignment_ready=False,
+                static_alignment_reason="heading_not_available",
+                wait_time_s=dt,
+            ),
+            None,
+        )
+
+    yaw = float(np.arctan2(displacement[1], displacement[0]))
+    alignment_position = bootstrap_anchor_frame.gnss_pos
+    static_check = _assess_static_coarse_alignment(
+        filter_engine,
+        initialization_samples,
+        alignment_position,
+        yaw,
+    )
+    return (
+        InitializationStatus(
+            phase="READY_BOOTSTRAP_INIT",
+            reason="bootstrap_position_pair_ready",
+            ready_mode="bootstrap_position_pair",
+            heading_source="position_pair_course",
+            static_alignment_ready=static_check.ready,
+            static_alignment_reason=static_check.reason,
+            wait_time_s=dt,
+        ),
+        static_check,
     )
 
 
@@ -97,14 +266,15 @@ def _initialize_filter_state(
     initialization_summary: dict[str, Any],
     mode: str,
 ) -> None:
-    static_alignment = None
+    static_alignment_check = None
     if alignment_position is not None:
-        static_alignment = _try_static_coarse_alignment(
+        static_alignment_check = _assess_static_coarse_alignment(
             filter_engine,
             initialization_samples,
             alignment_position,
             yaw,
         )
+    static_alignment = None if static_alignment_check is None else static_alignment_check.estimate
 
     if static_alignment is None:
         filter_engine.initialize(position, velocity, yaw)
@@ -114,6 +284,13 @@ def _initialize_filter_state(
                 "static_coarse_alignment_used": "false",
             }
         )
+        if static_alignment_check is not None:
+            initialization_summary.update(
+                {
+                    "static_alignment_ready": "true" if static_alignment_check.ready else "false",
+                    "static_alignment_reason": static_alignment_check.reason,
+                }
+            )
         return
 
     filter_engine.initialize(
@@ -129,6 +306,8 @@ def _initialize_filter_state(
         {
             "initialization_mode": f"{mode}_static_coarse_alignment",
             "static_coarse_alignment_used": "true",
+            "static_alignment_ready": "true",
+            "static_alignment_reason": static_alignment_check.reason if static_alignment_check is not None else "static_alignment_ready",
             "static_sample_count": str(static_alignment.sample_count),
             "static_duration_s": f"{static_alignment.duration_s:.6f}",
             "static_roll_deg": f"{np.rad2deg(static_alignment.roll):.6f}",
@@ -150,20 +329,38 @@ def _initialize_filter(
     frame,
     initialization_samples: list[ImuInitializationSample],
     initialization_summary: dict[str, Any],
+    bootstrap_anchor_frame=None,
 ) -> bool:
-    if frame.gnss_pos is None:
+    status, static_check = _assess_initialization_status(
+        filter_engine,
+        frame,
+        initialization_samples,
+        bootstrap_anchor_frame=bootstrap_anchor_frame,
+    )
+    if status.ready_mode != "direct":
         return False
-    if frame.gnss_vel is None and frame.mag_yaw is None:
-        return False
+    yaw = 0.0 if status.heading_source == "zero_yaw_fallback" else _resolve_initial_yaw(frame)
     _initialize_filter_state(
         filter_engine,
         position=frame.gnss_pos,
         velocity=_resolve_initial_velocity(frame),
-        yaw=_resolve_initial_yaw(frame),
+        yaw=yaw,
         initialization_samples=initialization_samples,
         alignment_position=frame.gnss_pos,
         initialization_summary=initialization_summary,
         mode="direct",
+    )
+    _summarize_initialization_status(
+        InitializationStatus(
+            phase="INITIALIZED",
+            reason="direct_init_completed",
+            ready_mode="direct",
+            heading_source=status.heading_source,
+            static_alignment_ready=static_check.ready,
+            static_alignment_reason=static_check.reason,
+            wait_time_s=status.wait_time_s,
+        ),
+        initialization_summary,
     )
     return True
 
@@ -174,24 +371,29 @@ def _bootstrap_initialize_from_position_pair(
     frame,
     initialization_samples: list[ImuInitializationSample],
     initialization_summary: dict[str, Any],
-    min_dt_s: float = 0.15,
-    min_horizontal_displacement_m: float = 0.5,
 ) -> bool:
     if anchor_frame is None or anchor_frame.gnss_pos is None or frame.gnss_pos is None:
         return False
 
+    init_config = filter_engine.config.initialization
     dt = float(frame.time - anchor_frame.time)
-    if dt < min_dt_s:
+    if dt < init_config.bootstrap_min_dt_s:
         return False
 
     displacement = frame.gnss_pos - anchor_frame.gnss_pos
     horizontal_displacement = float(np.linalg.norm(displacement[:2]))
-    if horizontal_displacement < min_horizontal_displacement_m:
+    if horizontal_displacement < init_config.bootstrap_min_horizontal_displacement_m:
         return False
 
     velocity = displacement / dt
     yaw = frame.mag_yaw if frame.mag_yaw is not None else float(np.arctan2(velocity[1], velocity[0]))
     alignment_position = anchor_frame.gnss_pos if anchor_frame.gnss_pos is not None else frame.gnss_pos
+    static_check = _assess_static_coarse_alignment(
+        filter_engine,
+        initialization_samples,
+        alignment_position,
+        yaw,
+    )
     _initialize_filter_state(
         filter_engine,
         position=frame.gnss_pos,
@@ -201,6 +403,18 @@ def _bootstrap_initialize_from_position_pair(
         alignment_position=alignment_position,
         initialization_summary=initialization_summary,
         mode="bootstrap_position_pair",
+    )
+    _summarize_initialization_status(
+        InitializationStatus(
+            phase="INITIALIZED",
+            reason="bootstrap_init_completed",
+            ready_mode="bootstrap_position_pair",
+            heading_source="position_pair_course" if frame.mag_yaw is None else "mag_yaw",
+            static_alignment_ready=static_check.ready,
+            static_alignment_reason=static_check.reason,
+            wait_time_s=dt,
+        ),
+        initialization_summary,
     )
     return True
 
@@ -282,7 +496,13 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
     initialization_samples: list[ImuInitializationSample] = []
     initialization_summary: dict[str, str] = {
         "initialization_mode": "uninitialized",
+        "initialization_phase": "WAITING_GNSS",
+        "initialization_reason": "no_gnss_position",
+        "initialization_ready_mode": "",
+        "heading_source": "none",
         "static_coarse_alignment_used": "false",
+        "static_alignment_ready": "false",
+        "static_alignment_reason": "not_evaluated",
     }
     last_time: float | None = None
     records: list[dict[str, Any]] = []
@@ -294,11 +514,19 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
         measurement_frame = observation_view(frame)
         truth_frame = diagnostic_truth_view(frame)
         if not filter_engine.initialized:
+            initialization_status, _ = _assess_initialization_status(
+                filter_engine,
+                measurement_frame,
+                initialization_samples,
+                bootstrap_anchor_frame,
+            )
+            _summarize_initialization_status(initialization_status, initialization_summary)
             if not _initialize_filter(
                 filter_engine,
                 measurement_frame,
                 initialization_samples,
                 initialization_summary,
+                bootstrap_anchor_frame,
             ):
                 if measurement_frame.gnss_pos is not None:
                     if bootstrap_anchor_frame is None:
@@ -507,10 +735,10 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
     save_navigation_plot(result_df, figure_dir / "navigation_diagnostics.png")
     save_covariance_plot(result_df, figure_dir / "covariance_diagnostics.png")
     save_state_machine_summary_plot(result_df, figure_dir / "state_machine_summary.png")
-    metrics = compute_metrics(result_df)
+    metrics = compute_metrics(result_df, initialization_summary=initialization_summary)
     metrics["processed_rows"] = float(len(result_df))
     metrics["pipeline_runtime_s"] = time.perf_counter() - pipeline_start
-    save_metrics(metrics, metrics_dir)
+    save_metrics(metrics, metrics_dir, initialization_summary=initialization_summary)
     return result_df
 
 

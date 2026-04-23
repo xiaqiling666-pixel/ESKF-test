@@ -7,9 +7,14 @@
 1. `core / measurements / adapters / analysis / tests` 分层。
 2. 一套可执行的离线融合原型主流程。
 3. GNSS 创新管理，包括 `NIS`、门限拒绝和自适应 `R`。
-4. 局部 `ENU` 导航环境、`earth rate / transport rate`、重力梯度、科里奥利相关诊断。
-5. 质量评分、状态机、滞回、防抖、恢复桥接和摘要统计。
-6. 自动化回归测试和结果图表输出。
+4. 观测管理层当前已统一覆盖：
+   `GNSS 位置`
+   `GNSS 速度`
+   `气压计高度`
+   `磁罗盘航向`
+5. 局部 `ENU` 导航环境、`earth rate / transport rate`、重力梯度、科里奥利相关诊断。
+6. 质量评分、状态机、滞回、防抖、恢复桥接和摘要统计。
+7. 自动化回归测试和结果图表输出。
 
 当前需要特别注意
 1. “能在样例数据上跑起来”
@@ -41,18 +46,26 @@
    roll/pitch 粗估
    gyro bias 粗估
    accel bias 粗估
-8. 当前传播已新增：
+8. 当前初始化过程已新增：
+   阶段状态
+   失败原因
+   heading 来源诊断
+   static alignment 诊断
+9. 当前初始化等待已新增：
+   超时控制
+   零航向回退开关
+10. 当前传播已新增：
    `dt` 下限检查
    `dt` 上限检查
    大步长跳过策略
    `dt` 诊断输出
-9. 状态机已经不只看有没有 GNSS，还会看：
+11. 状态机已经不只看有没有 GNSS，还会看：
    `reject streak`
    `GNSS outage`
    `quality score`
    `covariance health`
    `covariance duration`
-10. 当前已经加入：
+12. 当前已经加入：
    `GNSS_DEGRADED`
    `RECOVERING`
    滞回切换
@@ -182,15 +195,26 @@
    不要把位置差分硬当高可信速度。
 6. 每次运行后，`metrics\dataset_source_summary.txt`
    会明确写出本次到底用了哪些源文件和参考点。
-7. 对当前 `00000422` 这组数据，
+7. 每次运行后，`metrics\metrics_summary.txt`
+   现在会先写一段人类可读的初始化摘要，
+   再写完整指标键值。
+   初始化摘要当前包括：
+   初始化阶段
+   初始化方式
+   初始化原因
+   heading 来源
+   是否用了 static coarse alignment
+   是否触发了 zero yaw fallback
+   初始化前等待时长
+8. 对当前 `00000422` 这组数据，
    `IMU_Full.csv` 需要做轴系变换。
    当前推荐：
    `imu_transform_mode = ardupilot_frd_to_flu`
-8. 在这个变换下，
+9. 在这个变换下，
    `dx_decoded_flight_csv + gps_velocity_mode = none`
    已经能作为样例验证链工作，
    比当前外部 TCPPP 解算入口更稳。
-9. 以上内容当前的定位是：
+10. 以上内容当前的定位是：
    adapter 设计验证和输入语义核对，
    不是项目最终能力定义。
 
@@ -204,6 +228,8 @@
 协方差健康分类
 状态机摘要图
 模式统计和原因统计
+初始化指标统计
+初始化摘要文本输出
 当前这层才允许消费 `truth_*` 这类诊断/真值字段。
 
 你现在最值得看的结果文件
@@ -214,6 +240,14 @@
 5. `03_results\figures\state_machine_summary.png`
 6. `03_results\metrics\metrics_summary.txt`
 7. `03_results\metrics\fusion_output.csv`
+
+其中第 6 项当前建议优先看顶部的 `Initialization Summary`，
+再看下面的 `Metric Values`。
+这样可以先快速判断这次初始化到底是：
+`direct`
+还是 `bootstrap_position_pair`，
+有没有用 `static coarse alignment`，
+有没有触发 `zero yaw fallback`。
 
 你后面怎么继续用
 1. 先把项目主线和样例验证线区分开，不要把样例结论直接当成项目路线。
