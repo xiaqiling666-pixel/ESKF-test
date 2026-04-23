@@ -72,7 +72,7 @@
 03_results
 放运行结果。
 `figures` 里面是图。
-`metrics` 里面是 csv 和 txt 指标。
+`metrics` 里面是 CSV 和 TXT 指标。
 
 04_tools
 放一键运行和检查脚本。
@@ -91,7 +91,7 @@
 
 方式三
 在项目根目录打开终端后运行：
-`python -m unittest discover 05_tests`
+`pytest -q`
 
 方式四
 如果你要直接跑 `00000422` 的当前推荐真实数据配置，

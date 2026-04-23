@@ -118,9 +118,9 @@ def compute_metrics(result_df: pd.DataFrame) -> dict[str, float]:
     if "mode_transition_pending" in result_df.columns:
         pending_series = result_df["mode_transition_pending"].astype(bool)
         metrics["pending_row_count"] = float(pending_series.sum())
-        if "time" in result_df.columns and len(result_df) > 1:
-            time_step = result_df["time"].diff().fillna(0.0)
-            metrics["pending_duration_s"] = float(time_step[pending_series].sum())
+        if "time" in result_df.columns and not result_df.empty:
+            pending_durations = _sample_durations(result_df["time"])
+            metrics["pending_duration_s"] = float(pending_durations[pending_series].sum())
     return metrics
 
 

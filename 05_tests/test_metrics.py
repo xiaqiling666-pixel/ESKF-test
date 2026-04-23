@@ -78,6 +78,23 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["pending_row_count"], 1.0)
         self.assertAlmostEqual(metrics["pending_duration_s"], 1.0, places=9)
 
+    def test_pending_duration_counts_interval_after_pending_sample(self) -> None:
+        result_df = pd.DataFrame(
+            {
+                "time": [0.0, 0.4, 1.0, 1.5],
+                "quality_score": [80.0, 80.0, 80.0, 80.0],
+                "used_gnss_pos": [1, 1, 1, 1],
+                "used_baro": [1, 1, 1, 1],
+                "used_mag": [1, 1, 1, 1],
+                "mode_transition_pending": [True, False, True, False],
+            }
+        )
+
+        metrics = compute_metrics(result_df)
+
+        self.assertEqual(metrics["pending_row_count"], 2.0)
+        self.assertAlmostEqual(metrics["pending_duration_s"], 0.9, places=9)
+
 
 if __name__ == "__main__":
     unittest.main()
