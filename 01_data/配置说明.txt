@@ -149,6 +149,79 @@
 - `baro` 和 `mag_yaw` 也已经接入 measurement manager 的统一 policy
 - 这让观测管理层在当前项目里第一次真正覆盖了所有现有观测类型
 
+当前融合策略开关
+`fusion_policy`
+
+用途
+- 支持 baseline / ablation
+- 不改量测模型本身
+- 只控制 measurement manager 是否启用对应鲁棒策略
+
+当前字段
+- `use_nis_rejection`
+- `use_adaptive_r`
+- `use_recovery_scale`
+
+说明
+- 三个字段默认都是 `true`
+- 默认行为保持当前完整观测管理策略
+- 如果要做最基础 baseline，
+  可以在单独实验配置里关闭这些开关
+- 当前这只是实验开关，
+  还不是“质量驱动融合方法”本身
+- `quality_score` 和状态机目前仍主要用于诊断与统计，
+  尚未直接反作用于观测权重
+
+当前实验配置模板
+以下配置用于 baseline / ablation，
+默认都使用 `standard_csv` demo 数据，
+目的是先固定实验开关和结果目录，
+不是绑定某一组真实样例。
+
+1. `config_experiment_baseline_eskf.json`
+   - 关闭 NIS rejection
+   - 关闭 adaptive R
+   - 关闭 recovery scale
+
+2. `config_experiment_nis_reject.json`
+   - 开启 NIS rejection
+   - 关闭 adaptive R
+   - 关闭 recovery scale
+
+3. `config_experiment_adaptive_r.json`
+   - 开启 NIS rejection
+   - 开启 adaptive R
+   - 关闭 recovery scale
+
+4. `config_experiment_adaptive_r_recovery.json`
+   - 开启 NIS rejection
+   - 开启 adaptive R
+   - 开启 recovery scale
+
+5. `config_experiment_full_method.json`
+   - 当前完整原型策略模板
+   - 目前和完整 measurement manager 策略一致
+   - 注意：
+     quality score 和状态机仍主要用于诊断，
+     尚未直接反作用于滤波权重
+
+当前实验批处理入口
+`python 02_src\run_experiment_batch.py`
+
+用途
+- 顺序运行当前实验配置模板
+- 读取每个结果目录下的 `metrics.csv`
+- 汇总为：
+  `03_results_experiment_batch\experiment_metrics_summary.csv`
+- 同时生成紧凑版：
+  `03_results_experiment_batch\experiment_metrics_key_summary.csv`
+
+说明
+- 这个入口会生成结果目录
+- 日常开发检查仍优先使用：
+  `python -m unittest discover 05_tests`
+- 做实验对比时再运行批处理入口
+
 后面建议
 1. 通用配置继续保留在 `01_data` 根目录
 2. 样例验证配置可以继续按数据编号逐步增加

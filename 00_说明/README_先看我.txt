@@ -12,6 +12,11 @@
    `GNSS 速度`
    `气压计高度`
    `磁罗盘航向`
+   并已支持按 `fusion_policy`
+   打开或关闭：
+   `NIS reject`
+   `adaptive R`
+   `recovery scale`
 5. 局部 `ENU` 导航环境、`earth rate / transport rate`、重力梯度、科里奥利相关诊断。
 6. 质量评分、状态机、滞回、防抖、恢复桥接和摘要统计。
 7. 自动化回归测试和结果图表输出。
@@ -37,49 +42,73 @@
 当前版本已经做的关键升级
 1. 顶层入口和说明分开，减少“文件全堆在一起”的问题。
 2. 代码已拆成 `core`、`measurements`、`adapters`、`analysis`、`tests` 五层。
-3. `core` 已完成第一轮 KF-GINS 风格重构，状态布局、噪声布局、传播步骤和协方差传播已经拆清楚。
-4. `navigation.py` 和 `mechanization.py` 已从 `filter` 主体里拆出。
-5. 当前传播已接入局部曲率半径、重力梯度、`earth rate`、`transport rate` 和二阶离散化。
-6. 当前结果文件已输出导航环境诊断、协方差健康诊断和状态机诊断。
-7. 当前初始化已新增：
+3. `app.py` 正在从“大总管”收口为主流程编排：
+   结果导出已交给 `analysis.exporter`，
+   初始化流程控制已交给 `pipeline.initialization_controller`。
+4. `core` 已完成第一轮 KF-GINS 风格重构，状态布局、噪声布局、传播步骤和协方差传播已经拆清楚。
+5. `navigation.py` 和 `mechanization.py` 已从 `filter` 主体里拆出。
+6. 当前传播已接入局部曲率半径、重力梯度、`earth rate`、`transport rate` 和二阶离散化。
+7. 当前结果文件已输出导航环境诊断、协方差健康诊断和状态机诊断。
+8. 当前初始化已新增：
    静止粗对准入口
    roll/pitch 粗估
    gyro bias 粗估
    accel bias 粗估
-8. 当前初始化过程已新增：
+9. 当前初始化过程已新增：
    阶段状态
    失败原因
    heading 来源诊断
    static alignment 诊断
-9. 当前初始化等待已新增：
+10. 当前初始化等待已新增：
    超时控制
    零航向回退开关
-10. 当前传播已新增：
+11. 当前传播已新增：
    `dt` 下限检查
    `dt` 上限检查
    大步长跳过策略
    `dt` 诊断输出
-11. 状态机已经不只看有没有 GNSS，还会看：
+12. 状态机已经不只看有没有 GNSS，还会看：
    `reject streak`
    `GNSS outage`
    `quality score`
    `covariance health`
    `covariance duration`
-12. 当前已经加入：
+13. 当前已经加入：
    `GNSS_DEGRADED`
    `RECOVERING`
    滞回切换
    模式统计
    原因统计
    状态机摘要图
+14. 当前已新增 `fusion_policy`：
+   用于支持基础 ablation，
+   当前可分别控制：
+   `use_nis_rejection`
+   `use_adaptive_r`
+   `use_recovery_scale`
+   这一步只是实验开关雏形，
+   不代表质量评分和状态机已经真正反作用到滤波器。
+15. 当前 adapter 统一入口已新增输入质量报告：
+   字段完整性
+   可选观测覆盖率
+   诊断真值覆盖率
+   时间戳单调性
+   重复时间戳
+   非正时间步
+   大时间间隔
+   都会进入 source summary 和 metrics。
 
 建议你先看哪里
-1. 先双击 `04_tools\一键运行示例.bat`
-2. 如果你要先做检查，再双击 `04_tools\运行核心检查.bat`
-3. 再看 `03_results` 里面生成的图和指标文件
-4. 再看 `00_说明\项目主线与样例边界.txt`
-5. 再看 `00_说明\统一输入契约.txt`
-6. 最后再看 `02_src` 里面的代码
+1. 第一次接手项目，先看 `00_说明\运行环境与验收说明.txt`
+2. 先双击 `04_tools\检查运行环境.bat`
+3. 如果你要先做检查，再双击 `04_tools\运行核心检查.bat`
+4. 明确要看图和结果时，再双击 `04_tools\一键运行示例.bat`
+5. 再看 `03_results` 里面生成的图和指标文件
+6. 看结果时先看 `00_说明\运行结果阅读说明.txt`
+7. 再看 `00_说明\项目主线与样例边界.txt`
+8. 再看 `00_说明\统一输入契约.txt`
+9. 想判断当前整体进度时看 `00_说明\项目完成度评估.txt`
+10. 最后再看 `02_src` 里面的代码
 
 目录说明
 00_说明
@@ -111,6 +140,12 @@
 纯旋转传播方向
 
 最常用入口
+方式零
+双击 `04_tools\检查运行环境.bat`
+这个入口只检查 Python 和依赖包版本，
+不会运行主流程，
+也不会生成结果文件。
+
 方式一
 双击 `04_tools\一键运行示例.bat`
 这个入口会更新 `03_results`，适合你明确要看图和结果时再用。
@@ -131,6 +166,18 @@
 或运行：
 `python 02_src\main.py 01_data\config_00000422_decoded.json`
 
+方式五
+如果你要跑当前 baseline / ablation 实验模板，
+双击 `04_tools\运行实验对比模板.bat`
+或运行：
+`python 02_src\run_experiment_batch.py`
+这个入口会顺序运行当前实验配置模板，
+并在 `03_results_experiment_batch`
+下生成：
+`experiment_metrics_summary.csv`
+和：
+`experiment_metrics_key_summary.csv`
+
 配置使用原则
 1. `01_data\config.json`
    继续保留为通用默认配置。
@@ -139,6 +186,18 @@
 4. 配置角色现在已经进入代码约束：
    `config.json` 只能是 `default_general`
    其他单独配置不能冒充主配置。
+5. 如果要做 baseline / ablation，
+   优先新建单独实验配置，
+   修改其中的 `fusion_policy`，
+   不要直接覆盖通用默认配置。
+6. 当前已提供第一组实验配置模板：
+   `config_experiment_baseline_eskf.json`
+   `config_experiment_nis_reject.json`
+   `config_experiment_adaptive_r.json`
+   `config_experiment_adaptive_r_recovery.json`
+   `config_experiment_full_method.json`
+   它们用于固定策略开关组合，
+   先服务于对比实验链路。
 
 当前代码结构
 02_src\main.py
@@ -221,6 +280,7 @@
 02_src\eskf_stack\analysis
 放图表、指标、质量评分和状态机。
 当前已经包含：
+结果导出
 质量评分
 状态机
 滞回
@@ -230,7 +290,11 @@
 模式统计和原因统计
 初始化指标统计
 初始化摘要文本输出
+实验批处理指标汇总
 当前这层才允许消费 `truth_*` 这类诊断/真值字段。
+当前结果文件保存也已经从 `app.py`
+收口到 `analysis.exporter`，
+避免主流程继续承担过多输出细节。
 
 你现在最值得看的结果文件
 1. `03_results\figures\trajectory.png`

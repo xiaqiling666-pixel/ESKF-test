@@ -1,3 +1,5 @@
+# Python 3.10+ recommended.
+# Current project code only depends on the packages below.
 numpy>=1.26
 pandas>=2.2
 matplotlib>=3.8

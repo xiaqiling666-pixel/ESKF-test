@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import sys
 import unittest
 from pathlib import Path
@@ -48,12 +49,12 @@ class PhysicalDummyFilter(DummyFilter):
 
 
 class DummyMeasurement(MeasurementModel):
-    name = "dummy"
     freshness_timeout_s = 1.0
 
-    def __init__(self, residual_value: float, policy: MeasurementPolicy) -> None:
+    def __init__(self, residual_value: float, policy: MeasurementPolicy, name: str = "dummy") -> None:
         self._residual_value = residual_value
         self._policy = policy
+        self.name = name
 
     def is_available(self, frame: ObservationFrame) -> bool:
         return True
@@ -99,6 +100,25 @@ class MeasurementManagerTests(unittest.TestCase):
         self.assertEqual(result.management_mode, "reject")
         self.assertIsNone(self.filter_engine.last_R)
 
+    def test_manager_can_disable_nis_rejection_for_baseline_runs(self) -> None:
+        self.filter_engine.config = replace(
+            self.config,
+            fusion_policy=replace(self.config.fusion_policy, use_nis_rejection=False, use_adaptive_r=False),
+        )
+        model = DummyMeasurement(
+            residual_value=5.0,
+            policy=MeasurementPolicy(adapt_threshold=4.0, reject_threshold=16.0),
+        )
+
+        result = self.manager.process(self.filter_engine, model, self.frame)
+
+        self.assertTrue(result.used)
+        self.assertFalse(result.rejected)
+        self.assertEqual(result.management_mode, "update")
+        self.assertAlmostEqual(result.nis, 25.0, places=6)
+        self.assertAlmostEqual(result.applied_r_scale, 1.0, places=6)
+        self.assertAlmostEqual(float(self.filter_engine.last_R[0, 0]), 1.0, places=6)
+
     def test_manager_applies_adaptive_r_scaling(self) -> None:
         model = DummyMeasurement(
             residual_value=3.0,
@@ -114,6 +134,25 @@ class MeasurementManagerTests(unittest.TestCase):
         self.assertAlmostEqual(result.recovery_scale, 1.0, places=6)
         self.assertAlmostEqual(result.applied_r_scale, 2.25, places=6)
         self.assertAlmostEqual(float(self.filter_engine.last_R[0, 0]), 2.25, places=6)
+
+    def test_manager_can_disable_adaptive_r_for_ablation(self) -> None:
+        self.filter_engine.config = replace(
+            self.config,
+            fusion_policy=replace(self.config.fusion_policy, use_adaptive_r=False),
+        )
+        model = DummyMeasurement(
+            residual_value=3.0,
+            policy=MeasurementPolicy(adapt_threshold=4.0, reject_threshold=16.0),
+        )
+
+        result = self.manager.process(self.filter_engine, model, self.frame)
+
+        self.assertTrue(result.used)
+        self.assertEqual(result.management_mode, "update")
+        self.assertAlmostEqual(result.nis, 9.0, places=6)
+        self.assertAlmostEqual(result.adaptation_scale, 1.0, places=6)
+        self.assertAlmostEqual(result.applied_r_scale, 1.0, places=6)
+        self.assertAlmostEqual(float(self.filter_engine.last_R[0, 0]), 1.0, places=6)
 
     def test_manager_enters_gradual_recovery_after_repeated_rejections(self) -> None:
         reject_model = DummyMeasurement(
@@ -147,6 +186,185 @@ class MeasurementManagerTests(unittest.TestCase):
         self.assertAlmostEqual(first.recovery_scale, 3.0, places=6)
         self.assertAlmostEqual(second.recovery_scale, 2.0, places=6)
         self.assertAlmostEqual(third.recovery_scale, 1.0, places=6)
+
+    def test_manager_can_disable_recovery_scale_for_ablation(self) -> None:
+        self.filter_engine.config = replace(
+            self.config,
+            fusion_policy=replace(self.config.fusion_policy, use_recovery_scale=False),
+        )
+        reject_model = DummyMeasurement(
+            residual_value=5.0,
+            policy=MeasurementPolicy(
+                adapt_threshold=4.0,
+                reject_threshold=16.0,
+                recovery_trigger_reject_streak=2,
+                recovery_window=3,
+                recovery_max_scale=3.0,
+            ),
+        )
+        accept_model = DummyMeasurement(
+            residual_value=1.0,
+            policy=MeasurementPolicy(
+                adapt_threshold=4.0,
+                reject_threshold=16.0,
+                recovery_trigger_reject_streak=2,
+                recovery_window=3,
+                recovery_max_scale=3.0,
+            ),
+        )
+
+        self.manager.process(self.filter_engine, reject_model, self.frame)
+        self.manager.process(self.filter_engine, reject_model, self.frame)
+        result = self.manager.process(self.filter_engine, accept_model, self.frame)
+
+        self.assertEqual(result.management_mode, "update")
+        self.assertAlmostEqual(result.recovery_scale, 1.0, places=6)
+        self.assertAlmostEqual(result.applied_r_scale, 1.0, places=6)
+
+    def test_manager_applies_mode_based_gnss_scaling(self) -> None:
+        self.filter_engine.config = replace(
+            self.config,
+            fusion_policy=replace(self.config.fusion_policy, use_adaptive_r=False, use_recovery_scale=False),
+        )
+        model = DummyMeasurement(
+            residual_value=1.0,
+            policy=MeasurementPolicy(adapt_threshold=4.0, reject_threshold=16.0),
+            name="gnss_pos",
+        )
+
+        result = self.manager.process(self.filter_engine, model, self.frame, current_mode="GNSS_DEGRADED")
+
+        self.assertTrue(result.used)
+        self.assertAlmostEqual(result.mode_scale, 2.0, places=6)
+        self.assertAlmostEqual(result.applied_r_scale, 2.0, places=6)
+        self.assertAlmostEqual(float(self.filter_engine.last_R[0, 0]), 2.0, places=6)
+
+    def test_manager_applies_recovering_mode_scales_for_gnss_measurements(self) -> None:
+        self.filter_engine.config = replace(
+            self.config,
+            fusion_policy=replace(self.config.fusion_policy, use_adaptive_r=False, use_recovery_scale=False),
+        )
+
+        for sensor_name, expected_scale in (("gnss_pos", 1.25), ("gnss_vel", 1.15)):
+            with self.subTest(sensor_name=sensor_name):
+                self.filter_engine.last_R = None
+                model = DummyMeasurement(
+                    residual_value=1.0,
+                    policy=MeasurementPolicy(adapt_threshold=4.0, reject_threshold=16.0),
+                    name=sensor_name,
+                )
+
+                result = self.manager.process(self.filter_engine, model, self.frame, current_mode="RECOVERING")
+
+                self.assertTrue(result.used)
+                self.assertAlmostEqual(result.mode_scale, expected_scale, places=6)
+                self.assertAlmostEqual(result.applied_r_scale, expected_scale, places=6)
+                self.assertAlmostEqual(float(self.filter_engine.last_R[0, 0]), expected_scale, places=6)
+
+    def test_mode_scaling_is_limited_to_gnss_measurements(self) -> None:
+        self.filter_engine.config = replace(
+            self.config,
+            fusion_policy=replace(self.config.fusion_policy, use_adaptive_r=False, use_recovery_scale=False),
+        )
+
+        for sensor_name in ("baro", "mag_yaw"):
+            with self.subTest(sensor_name=sensor_name):
+                self.filter_engine.last_R = None
+                model = DummyMeasurement(
+                    residual_value=1.0,
+                    policy=MeasurementPolicy(adapt_threshold=4.0, reject_threshold=16.0),
+                    name=sensor_name,
+                )
+
+                result = self.manager.process(self.filter_engine, model, self.frame, current_mode="GNSS_DEGRADED")
+
+                self.assertTrue(result.used)
+                self.assertAlmostEqual(result.mode_scale, 1.0, places=6)
+                self.assertAlmostEqual(result.applied_r_scale, 1.0, places=6)
+                self.assertAlmostEqual(float(self.filter_engine.last_R[0, 0]), 1.0, places=6)
+
+    def test_mode_scaling_changes_gnss_rejection_decision(self) -> None:
+        self.filter_engine.config = replace(
+            self.config,
+            fusion_policy=replace(self.config.fusion_policy, use_adaptive_r=False, use_recovery_scale=False),
+        )
+        model = DummyMeasurement(
+            residual_value=5.0,
+            policy=MeasurementPolicy(adapt_threshold=4.0, reject_threshold=16.0),
+            name="gnss_pos",
+        )
+
+        result = self.manager.process(self.filter_engine, model, self.frame, current_mode="GNSS_DEGRADED")
+
+        self.assertTrue(result.available)
+        self.assertTrue(result.used)
+        self.assertFalse(result.rejected)
+        self.assertEqual(result.management_mode, "update")
+        self.assertAlmostEqual(result.mode_scale, 2.0, places=6)
+        self.assertAlmostEqual(result.nis, 12.5, places=6)
+        self.assertAlmostEqual(result.applied_r_scale, 2.0, places=6)
+        self.assertAlmostEqual(float(self.filter_engine.last_R[0, 0]), 2.0, places=6)
+
+    def test_mode_scale_is_recorded_when_gnss_measurement_is_rejected(self) -> None:
+        self.filter_engine.config = replace(
+            self.config,
+            fusion_policy=replace(self.config.fusion_policy, use_adaptive_r=False, use_recovery_scale=False),
+        )
+        model = DummyMeasurement(
+            residual_value=6.0,
+            policy=MeasurementPolicy(adapt_threshold=4.0, reject_threshold=16.0),
+            name="gnss_pos",
+        )
+
+        result = self.manager.process(self.filter_engine, model, self.frame, current_mode="GNSS_DEGRADED")
+
+        self.assertTrue(result.available)
+        self.assertFalse(result.used)
+        self.assertTrue(result.rejected)
+        self.assertEqual(result.management_mode, "reject")
+        self.assertAlmostEqual(result.mode_scale, 2.0, places=6)
+        self.assertAlmostEqual(result.nis, 18.0, places=6)
+        self.assertIsNone(self.filter_engine.last_R)
+
+    def test_mode_scaling_changes_gnss_velocity_rejection_decision(self) -> None:
+        self.filter_engine.config = replace(
+            self.config,
+            fusion_policy=replace(self.config.fusion_policy, use_adaptive_r=False, use_recovery_scale=False),
+        )
+        model = DummyMeasurement(
+            residual_value=4.5,
+            policy=MeasurementPolicy(adapt_threshold=4.0, reject_threshold=16.0),
+            name="gnss_vel",
+        )
+
+        result = self.manager.process(self.filter_engine, model, self.frame, current_mode="GNSS_DEGRADED")
+
+        self.assertTrue(result.available)
+        self.assertTrue(result.used)
+        self.assertFalse(result.rejected)
+        self.assertEqual(result.management_mode, "update")
+        self.assertAlmostEqual(result.mode_scale, 1.5, places=6)
+        self.assertAlmostEqual(result.nis, 13.5, places=6)
+        self.assertAlmostEqual(result.applied_r_scale, 1.5, places=6)
+        self.assertAlmostEqual(float(self.filter_engine.last_R[0, 0]), 1.5, places=6)
+
+    def test_manager_skips_mode_scaling_when_disabled(self) -> None:
+        self.filter_engine.config = replace(
+            self.config,
+            mode_measurement_scaling=replace(self.config.mode_measurement_scaling, enabled=False),
+            fusion_policy=replace(self.config.fusion_policy, use_adaptive_r=False, use_recovery_scale=False),
+        )
+        model = DummyMeasurement(
+            residual_value=1.0,
+            policy=MeasurementPolicy(adapt_threshold=4.0, reject_threshold=16.0),
+            name="gnss_vel",
+        )
+
+        result = self.manager.process(self.filter_engine, model, self.frame, current_mode="RECOVERING")
+
+        self.assertTrue(result.used)
+        self.assertAlmostEqual(result.mode_scale, 1.0, places=6)
+        self.assertAlmostEqual(result.applied_r_scale, 1.0, places=6)
 
     def test_barometer_measurement_uses_manager_rejection_policy(self) -> None:
         filter_engine = PhysicalDummyFilter(self.config)

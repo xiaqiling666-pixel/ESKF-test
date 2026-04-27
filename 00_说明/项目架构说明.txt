@@ -9,6 +9,24 @@
 代码很快就会互相缠住。
 
 当前架构
+顶层主流程
+`app.py` 仍然是离线流水线入口，
+但它不应该继续吸收所有业务细节。
+
+当前已经先拆出两类编排辅助：
+- `analysis.exporter`
+  负责结果导出、图表和指标保存。
+- `pipeline.initialization_controller`
+  负责初始化阶段判断、等待控制、
+  direct / bootstrap 初始化入口选择、
+  以及初始化摘要字段更新。
+
+这里的 `pipeline` 不是新的算法层，
+它只承接“主流程如何组织已有模块”的职责。
+核心初始化模型仍在 `core.initialization`，
+量测模型仍在 `measurements`，
+结果统计仍在 `analysis`。
+
 1. core
 只放滤波内核。
 包括：
@@ -97,6 +115,7 @@
 - 异常拒绝
 - 自适应 R 放大
 - 连续拒绝后的恢复阶段渐进重接入
+- 按 `fusion_policy` 开关启停上述策略
 
 截至当前版本，这层统一策略已经覆盖：
 - gnss_position
@@ -109,6 +128,20 @@
 和
 “鲁棒更新怎么做”
 分开。
+
+当前 `fusion_policy` 的定位要说清楚：
+- 它是 baseline / ablation 开关
+- 它不是新的算法创新本身
+- 它让后续可以比较：
+  普通更新
+  NIS reject
+  adaptive R
+  recovery scale
+
+当前仍然没有完成的是：
+- quality score 直接控制观测权重
+- mode state 直接改变量测准入策略
+- 退化场景下的统一数学化权重函数
 
 以后如果你要做论文里的：
 - quality score
@@ -129,12 +162,28 @@
 当前已有：
 - csv_dataset.py
 - demo_generator.py
+- input_quality.py
 
 从项目主线角度，现在 `adapters` 最关键的不只是“能读文件”，
 而是：
 必须把不同来源的数据统一翻译成同一份标准输入契约。
 这也是为什么 adapter 可以继续增加，
 但 `core` 不应该跟着每种数据格式一起变。
+
+当前 adapter 统一入口还会生成输入质量报告。
+这份报告会统计：
+- 核心输入完整性
+- 可选观测覆盖率
+- 诊断真值覆盖率
+- 原始时间戳单调性
+- 重复时间戳
+- 非正时间步
+- 大时间间隔
+
+这些字段会写入 `dataset_source_summary.txt`，
+也会以数值形式进入 metrics。
+它的定位是数据接入诊断，
+不是滤波算法本身。
 
 以后你要接：
 - PX4 csv
@@ -146,6 +195,7 @@
 负责结果后处理，不污染滤波主干。
 当前已经包含：
 - 指标计算
+- 结果导出
 - 画图
 - 质量评分
 - 状态机标签
@@ -157,6 +207,7 @@
 - 状态机摘要图
 - 初始化运行级指标
 - 初始化可读摘要输出
+- 实验批处理指标汇总
 
 这层当前的真实链路大致是：
 `sensor freshness + innovations + covariance health`
@@ -177,6 +228,28 @@
 - 裸 metric 键值
 
 而是能直接进入实验结果阅读链路。
+
+当前 `analysis.experiment_batch` 的定位是：
+- 顺序运行一组实验配置
+- 读取每组结果里的 `metrics.csv`
+- 汇总成 `experiment_metrics_summary.csv`
+- 额外生成更适合人工快速比较的
+  `experiment_metrics_key_summary.csv`
+
+它不改滤波器，
+也不定义新算法。
+它的作用是补研究证据链里最基础的：
+baseline / ablation 对比表。
+
+当前 `analysis.exporter` 的定位是：
+- 保存 `fusion_output.csv`
+- 保存 `dataset_source_summary.txt`
+- 保存 figures
+- 保存 metrics
+
+这一步把结果输出职责从 `app.py` 里拆出来，
+让 `app.py` 更接近主流程编排，
+让 `analysis` 继续承担结果后处理和导出职责。
 
 5. tests
 当前已经不只是最小核心检查。

@@ -74,6 +74,20 @@ class InnovationManagement:
 
 
 @dataclass
+class FusionPolicy:
+    use_nis_rejection: bool
+    use_adaptive_r: bool
+    use_recovery_scale: bool
+
+
+@dataclass
+class ModeMeasurementScaling:
+    enabled: bool
+    gnss_pos: dict[str, float] = field(default_factory=dict)
+    gnss_vel: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
 class NavigationEnvironmentConfig:
     frame: str
     reference_lat_deg: float
@@ -110,6 +124,8 @@ class AppConfig:
     initialization: InitializationConfig
     time_step_management: TimeStepManagementConfig
     innovation_management: InnovationManagement
+    fusion_policy: FusionPolicy
+    mode_measurement_scaling: ModeMeasurementScaling
     navigation_environment: NavigationEnvironmentConfig
     use_baro: bool
     use_mag: bool
@@ -180,6 +196,26 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
             )
         ),
         innovation_management=InnovationManagement(**payload["innovation_management"]),
+        fusion_policy=FusionPolicy(
+            **payload.get(
+                "fusion_policy",
+                {
+                    "use_nis_rejection": True,
+                    "use_adaptive_r": True,
+                    "use_recovery_scale": True,
+                },
+            )
+        ),
+        mode_measurement_scaling=ModeMeasurementScaling(
+            **payload.get(
+                "mode_measurement_scaling",
+                {
+                    "enabled": False,
+                    "gnss_pos": {},
+                    "gnss_vel": {},
+                },
+            )
+        ),
         navigation_environment=NavigationEnvironmentConfig(
             **payload.get(
                 "navigation_environment",

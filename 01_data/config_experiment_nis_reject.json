@@ -1,23 +1,14 @@
 {
   "config_metadata": {
-    "profile": "sample_validation",
-    "name": "00000422 decoded 样例验证配置",
-    "purpose": "用于验证 decoded 飞控目录在当前原型框架上的输入语义和 adapter 设计。"
+    "profile": "experiment",
+    "name": "eskf_nis_reject",
+    "purpose": "实验模板：只开启 NIS reject，关闭 adaptive R 和 recovery scale。"
   },
   "dataset_path": "01_data/generated/demo_sensor_log.csv",
   "dataset_adapter": {
-    "kind": "dx_decoded_flight_csv",
-    "options": {
-      "decoded_dir": "C:\\Users\\xzh\\Desktop\\DX\\05_data\\dx_data\\decoded\\00000422",
-      "reference_mode": "first_gps",
-      "normalize_time_to_zero": true,
-      "gps_alignment_tolerance_s": 0.12,
-      "truth_alignment_tolerance_s": 0.06,
-      "gps_velocity_mode": "none",
-      "imu_transform_mode": "ardupilot_frd_to_flu"
-    }
+    "kind": "standard_csv"
   },
-  "results_dir": "03_results_00000422_decoded_recommended",
+  "results_dir": "03_results_experiment_nis_reject",
   "gravity": [0.0, 0.0, -9.81],
   "process_noise": {
     "accel_std": 0.08,
@@ -67,19 +58,8 @@
   },
   "fusion_policy": {
     "use_nis_rejection": true,
-    "use_adaptive_r": true,
-    "use_recovery_scale": true
-  },
-  "mode_measurement_scaling": {
-    "enabled": true,
-    "gnss_pos": {
-      "GNSS_DEGRADED": 2.0,
-      "RECOVERING": 1.25
-    },
-    "gnss_vel": {
-      "GNSS_DEGRADED": 1.5,
-      "RECOVERING": 1.15
-    }
+    "use_adaptive_r": false,
+    "use_recovery_scale": false
   },
   "navigation_environment": {
     "frame": "ENU",
@@ -89,6 +69,6 @@
     "use_wgs84_gravity": true,
     "use_earth_rotation": true
   },
-  "use_baro": false,
-  "use_mag": false
+  "use_baro": true,
+  "use_mag": true
 }

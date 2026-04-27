@@ -56,6 +56,22 @@
     "mag_yaw_nis_adapt_threshold": 3.841,
     "mag_yaw_nis_reject_threshold": 10.828
   },
+  "fusion_policy": {
+    "use_nis_rejection": true,
+    "use_adaptive_r": true,
+    "use_recovery_scale": true
+  },
+  "mode_measurement_scaling": {
+    "enabled": true,
+    "gnss_pos": {
+      "GNSS_DEGRADED": 2.0,
+      "RECOVERING": 1.25
+    },
+    "gnss_vel": {
+      "GNSS_DEGRADED": 1.5,
+      "RECOVERING": 1.15
+    }
+  },
   "navigation_environment": {
     "frame": "ENU",
     "reference_lat_deg": 22.3027,

@@ -1,0 +1,390 @@
+运行结果阅读说明
+
+这份说明只回答一个问题：
+运行项目后，
+`03_results` 或其他结果目录里的文件应该怎么看。
+
+一、先区分三类输出
+
+当前结果输出主要分成三类：
+
+1. 输入与配置来源
+   主要文件：
+   `metrics\dataset_source_summary.txt`
+
+2. 滤波逐帧记录
+   主要文件：
+   `metrics\fusion_output.csv`
+
+3. 汇总指标和图表
+   主要文件：
+   `metrics\metrics.csv`
+   `metrics\metrics_summary.txt`
+   `figures\*.png`
+
+不要把这三类混在一起理解。
+
+输入质量好，
+不代表滤波结果一定好。
+
+滤波诊断多，
+不代表算法创新已经完成。
+
+有真值 RMSE，
+也不代表项目已经完成工程化验证。
+
+二、dataset_source_summary.txt 怎么看
+
+这个文件回答：
+这次运行到底用了什么配置、什么 adapter、什么输入来源。
+
+重点看：
+
+1. `config_profile`
+   判断这是通用默认配置，
+   还是样例配置，
+   还是实验配置。
+
+2. `adapter_kind`
+   判断数据从哪个 adapter 进入项目。
+
+3. `primary_input_role`
+   判断当前输入到底是什么角色。
+   例如：
+   - IMU + decoded flight csv
+   - IMU + external solution
+   - standard csv
+
+4. `fusion_policy_use_*`
+   判断当前是否开启：
+   - NIS reject
+   - adaptive R
+   - recovery scale
+
+5. `initialization_summary`
+   判断初始化最终走了什么路线：
+   - direct
+   - bootstrap position pair
+   - static coarse alignment
+   - zero yaw fallback
+
+6. `input_quality_*`
+   判断数据进入滤波前的质量。
+
+三、input_quality_* 怎么看
+
+`input_quality_*` 不是滤波效果指标。
+它是输入数据体检结果。
+
+重点字段：
+
+1. `input_quality_row_count`
+   标准化后的数据行数。
+
+2. `input_quality_core_complete_ratio`
+   核心输入完整比例。
+   对当前项目来说，
+   核心输入是：
+   `time / ax / ay / az / gx / gy / gz`
+
+3. `input_quality_gnss_pos_coverage_ratio`
+   GNSS 位置观测覆盖率。
+
+4. `input_quality_gnss_vel_coverage_ratio`
+   GNSS 速度观测覆盖率。
+
+5. `input_quality_baro_coverage_ratio`
+   气压计观测覆盖率。
+
+6. `input_quality_mag_yaw_coverage_ratio`
+   磁航向观测覆盖率。
+
+7. `input_quality_diagnostic_truth_present`
+   是否存在诊断真值。
+
+8. `input_quality_diagnostic_truth_role`
+   当前应为：
+   `evaluation_only_not_filter_input`
+
+这条很重要。
+`truth_*` 只能用于评价、画图和指标，
+不能被当成滤波观测。
+
+时间相关字段：
+
+1. `input_quality_time_monotonic_input_order`
+   原始输入顺序下时间是否单调。
+
+2. `input_quality_time_duplicate_count`
+   重复时间戳数量。
+
+3. `input_quality_time_non_positive_dt_count`
+   原始输入中非正时间步数量。
+
+4. `input_quality_time_max_gap_s`
+   最大时间间隔。
+
+5. `input_quality_time_large_gap_count`
+   大时间间隔数量。
+
+如果这些时间质量字段异常，
+优先检查 adapter 或原始日志，
+不要先去调滤波参数。
+
+四、fusion_output.csv 怎么看
+
+这个文件是逐帧记录。
+
+它适合排查：
+1. 每一帧预测用了多大 `dt`
+2. 哪些观测可用
+3. 哪些观测被使用
+4. 哪些观测被拒绝
+5. NIS 和 R scale 怎么变化
+6. 当前模式和模式原因
+7. 协方差健康状态
+8. 估计状态和真值误差
+
+常见字段分组：
+
+传播诊断：
+- `dt_raw_s`
+- `dt_applied_s`
+- `predict_skipped`
+- `predict_warning`
+- `predict_reason`
+
+估计状态：
+- `est_x / est_y / est_z`
+- `est_vx / est_vy / est_vz`
+- `est_roll / est_pitch / est_yaw`
+- `bg_*`
+- `ba_*`
+
+观测可用性：
+- `available_gnss_pos`
+- `available_gnss_vel`
+- `available_baro`
+- `available_mag`
+
+观测使用情况：
+- `used_gnss_pos`
+- `used_gnss_vel`
+- `used_baro`
+- `used_mag`
+
+观测管理：
+- `gnss_pos_nis`
+- `gnss_vel_nis`
+- `baro_nis`
+- `mag_nis`
+- `gnss_pos_rejected`
+- `gnss_vel_rejected`
+- `baro_rejected`
+- `mag_rejected`
+- `*_r_scale`
+- `*_recovery_scale`
+- `*_management_mode`
+
+状态机和质量：
+- `quality_score`
+- `mode`
+- `mode_reason`
+- `mode_target`
+- `mode_transition_pending`
+
+协方差健康：
+- `pos_sigma_norm_m`
+- `vel_sigma_norm_mps`
+- `att_sigma_norm_deg`
+- `covariance_health`
+- `covariance_health_reason`
+
+诊断真值：
+- `truth_x / truth_y / truth_z`
+- `truth_vx / truth_vy / truth_vz`
+- `truth_yaw`
+
+诊断真值字段只用于 analysis。
+如果要看滤波实际输入，
+看 `available_*` 和 `used_*`，
+不要看 `truth_*`。
+
+五、metrics.csv 怎么看
+
+这个文件是汇总指标表。
+当前列包括：
+- `metric`
+- `value`
+- `category`
+
+其中 `category` 用来区分指标类型，
+避免把输入质量、滤波诊断和误差评估混在一起看。
+
+当前指标大致分成：
+
+1. 误差指标
+   前提是存在诊断真值。
+   例如：
+   - `position_rmse_m`
+   - `velocity_rmse_mps`
+   - `yaw_rmse_deg`
+   - `final_position_error_m`
+
+2. 输入质量指标
+   例如：
+   - `input_quality_*`
+
+3. 观测更新统计
+   例如：
+   - `gnss_pos_updates`
+   - `baro_updates`
+   - `mag_updates`
+
+4. 观测管理统计
+   例如：
+   - `gnss_pos_rejections`
+   - `gnss_vel_rejections`
+   - `gnss_pos_adapted_updates`
+   - `mean_gnss_pos_nis`
+
+5. 传播诊断统计
+   例如：
+   - `predict_skipped_count`
+   - `predict_warning_count`
+   - `max_dt_raw_s`
+   - `max_dt_applied_s`
+
+6. 协方差健康统计
+   例如：
+   - `final_pos_sigma_norm_m`
+   - `min_cov_diag`
+   - `covariance_caution_row_count`
+   - `covariance_unhealthy_row_count`
+
+7. 模式和原因统计
+   例如：
+   - `mode_transition_count`
+   - `mode_duration_*`
+   - `mode_reason_duration_*`
+
+8. 初始化指标
+   例如：
+   - `initialization_completed_flag`
+   - `initialization_mode_direct_flag`
+   - `initialization_mode_bootstrap_position_pair_flag`
+   - `initialization_static_coarse_alignment_used_flag`
+   - `initialization_zero_yaw_fallback_used_flag`
+   - `initialization_wait_s`
+
+常见 `category` 包括：
+- `input_quality`
+- `initialization`
+- `estimation_error`
+- `measurement_management`
+- `prediction_diagnostics`
+- `covariance_health`
+- `mode_state`
+- `navigation_environment`
+- `runtime`
+- `other`
+
+六、metrics_summary.txt 怎么看
+
+这个文件更适合人工快速阅读。
+
+它会先写初始化摘要，
+再写指标键值。
+
+如果只是想快速确认本次运行：
+1. 初始化是否成功
+2. 用了哪种初始化方式
+3. 是否用了 static coarse alignment
+4. 是否触发 zero yaw fallback
+5. 是否存在明显输入质量问题
+
+优先看这个文件。
+
+七、figures 目录怎么看
+
+当前图表是辅助诊断，
+不是单独证明。
+
+常见用途：
+
+1. `trajectory.png`
+   看估计轨迹和真值轨迹趋势。
+
+2. `error_summary.png`
+   看位置、速度、航向误差。
+
+3. `quality_mode.png`
+   看质量评分和模式变化。
+
+4. `navigation_diagnostics.png`
+   看导航环境相关诊断。
+
+5. `covariance_diagnostics.png`
+   看协方差健康变化。
+
+6. `state_machine_summary.png`
+   看模式持续时间和原因分布。
+
+图表只帮助定位问题，
+不要只凭一张图说算法有效。
+
+八、推荐阅读顺序
+
+如果是一次新运行结果，
+建议按这个顺序看：
+
+1. `dataset_source_summary.txt`
+   先确认配置、adapter、输入来源和输入质量。
+
+2. `metrics_summary.txt`
+   再确认初始化、主要指标和诊断统计。
+
+3. `metrics.csv`
+   需要做对比时看完整指标。
+
+4. `fusion_output.csv`
+   出现异常时逐帧排查。
+
+5. `figures`
+   最后结合图表看趋势。
+
+九、当前不能过度解读的内容
+
+1. `quality_score`
+   当前主要是诊断评分，
+   还没有正式作为滤波权重控制变量。
+
+2. `mode`
+   当前主要是状态机标签和统计，
+   还没有完整反作用于量测准入策略。
+
+3. `config_experiment_full_method.json`
+   当前只是完整原型策略模板，
+   不能理解成已经完成论文完整方法。
+
+4. 单个样例的 RMSE
+   只能说明这组数据上的表现，
+   不能代表项目已经工程化完成。
+
+十、发现问题时优先排查顺序
+
+1. 先看 `input_quality_*`
+   排除字段缺失、时间轴异常、观测覆盖率过低。
+
+2. 再看初始化摘要
+   排除没有 heading、等待过长、fallback 被误触发等问题。
+
+3. 再看 `predict_reason`
+   排除 dt 异常导致传播跳过或截断。
+
+4. 再看 `available_* / used_* / rejected_*`
+   判断观测是否真的进入滤波。
+
+5. 最后再看 RMSE 和图表。
+
+这个顺序比直接调参数更稳。

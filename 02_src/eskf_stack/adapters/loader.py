@@ -4,9 +4,9 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..config import AppConfig
+from ..config import AppConfig, project_path
 from .contract import ensure_standard_sensor_dataframe
-from .csv_dataset import load_sensor_dataframe
+from .input_quality import build_input_quality_report
 
 
 @dataclass(frozen=True)
@@ -21,14 +21,16 @@ class DatasetLoadResult:
     dataframe: pd.DataFrame
     navigation_reference_override: NavigationReferenceOverride | None = None
     source_summary: dict[str, str] | None = None
+    input_quality_metrics: dict[str, float] | None = None
 
 
 def load_dataset_from_config(config: AppConfig) -> DatasetLoadResult:
     adapter_kind = config.dataset_adapter.kind
 
     if adapter_kind == "standard_csv":
+        dataset_path = project_path(config.dataset_path)
         result = DatasetLoadResult(
-            dataframe=load_sensor_dataframe(config.dataset_path),
+            dataframe=pd.read_csv(dataset_path),
             source_summary={
                 "adapter_kind": "standard_csv",
                 "filter_input_dataset": str(config.dataset_path),
@@ -53,10 +55,14 @@ def load_dataset_from_config(config: AppConfig) -> DatasetLoadResult:
         result.dataframe,
         source_name=f"adapter:{adapter_kind}",
     )
+    input_quality_report = build_input_quality_report(result.dataframe, standardized_dataframe)
+    source_summary = dict(result.source_summary or {})
+    source_summary.update(input_quality_report.summary)
     return DatasetLoadResult(
         dataframe=standardized_dataframe,
         navigation_reference_override=result.navigation_reference_override,
-        source_summary=result.source_summary,
+        source_summary=source_summary,
+        input_quality_metrics=input_quality_report.metrics,
     )
 
 

@@ -9,6 +9,42 @@ from ..core.math_utils import wrap_angle
 from .truth_access import has_diagnostic_truth, truth_position_columns, truth_velocity_columns, truth_yaw_column
 
 
+def metric_category(metric_name: str) -> str:
+    if metric_name.startswith("input_quality_"):
+        return "input_quality"
+    if metric_name.startswith("initialization_"):
+        return "initialization"
+    if metric_name in {
+        "position_rmse_m",
+        "velocity_rmse_mps",
+        "yaw_rmse_deg",
+        "final_position_error_m",
+    }:
+        return "estimation_error"
+    if metric_name.startswith("gnss_") or metric_name in {
+        "baro_updates",
+        "mag_updates",
+        "mean_quality_score",
+    }:
+        return "measurement_management"
+    if metric_name.startswith("predict_") or metric_name in {"max_dt_raw_s", "max_dt_applied_s"}:
+        return "prediction_diagnostics"
+    if metric_name.startswith("covariance_") or metric_name in {
+        "final_pos_sigma_norm_m",
+        "final_vel_sigma_norm_mps",
+        "final_att_sigma_norm_deg",
+        "min_cov_diag",
+    }:
+        return "covariance_health"
+    if metric_name.startswith("mode_") or metric_name in {"pending_row_count", "pending_duration_s"}:
+        return "mode_state"
+    if "gravity" in metric_name or "coriolis" in metric_name:
+        return "navigation_environment"
+    if metric_name in {"processed_rows", "pipeline_runtime_s"}:
+        return "runtime"
+    return "other"
+
+
 def _parse_bool_flag(value: object) -> float | None:
     text = str(value).strip().lower()
     if text in {"true", "1", "yes"}:
@@ -177,6 +213,10 @@ def compute_metrics(
         metrics["gnss_pos_adapted_updates"] = float((result_df["gnss_pos_r_scale"] > 1.0).sum())
     if "gnss_vel_r_scale" in result_df.columns:
         metrics["gnss_vel_adapted_updates"] = float((result_df["gnss_vel_r_scale"] > 1.0).sum())
+    if "gnss_pos_mode_scale" in result_df.columns:
+        metrics["gnss_pos_mode_scaled_updates"] = float((result_df["gnss_pos_mode_scale"] > 1.0).sum())
+    if "gnss_vel_mode_scale" in result_df.columns:
+        metrics["gnss_vel_mode_scaled_updates"] = float((result_df["gnss_vel_mode_scale"] > 1.0).sum())
     if "gnss_pos_nis" in result_df.columns:
         valid_pos_nis = result_df["gnss_pos_nis"].dropna()
         if not valid_pos_nis.empty:
@@ -244,7 +284,14 @@ def save_metrics(
     initialization_summary: dict[str, object] | None = None,
 ) -> None:
     metrics_frame = pd.DataFrame(
-        [{"metric": metric_name, "value": metric_value} for metric_name, metric_value in metrics.items()]
+        [
+            {
+                "metric": metric_name,
+                "value": metric_value,
+                "category": metric_category(metric_name),
+            }
+            for metric_name, metric_value in metrics.items()
+        ]
     )
     metrics_frame.to_csv(output_dir / "metrics.csv", index=False)
 

@@ -7,6 +7,32 @@ from ..core.filter import OfflineESKF
 from .base import MeasurementModel, MeasurementResult, MeasurementUpdate, innovation_covariance, mahalanobis_squared
 
 
+def _policy_enabled(filter_engine: OfflineESKF, field_name: str) -> bool:
+    fusion_policy = getattr(getattr(filter_engine, "config", None), "fusion_policy", None)
+    if fusion_policy is None:
+        return True
+    return bool(getattr(fusion_policy, field_name))
+
+
+def _mode_measurement_scale(filter_engine: OfflineESKF, sensor_name: str, current_mode: str | None) -> float:
+    if not current_mode:
+        return 1.0
+
+    scaling = getattr(getattr(filter_engine, "config", None), "mode_measurement_scaling", None)
+    if scaling is None or not getattr(scaling, "enabled", False):
+        return 1.0
+
+    scale_map = None
+    if sensor_name == "gnss_pos":
+        scale_map = scaling.gnss_pos
+    elif sensor_name == "gnss_vel":
+        scale_map = scaling.gnss_vel
+
+    if not isinstance(scale_map, dict):
+        return 1.0
+    return max(1.0, float(scale_map.get(current_mode, 1.0)))
+
+
 @dataclass
 class MeasurementManager:
     reject_streaks: dict[str, int] = field(default_factory=dict)
@@ -23,6 +49,7 @@ class MeasurementManager:
         filter_engine: OfflineESKF,
         model: MeasurementModel,
         frame: ObservationFrame,
+        current_mode: str | None = None,
     ) -> MeasurementResult:
         if not model.is_available(frame):
             return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
@@ -31,18 +58,21 @@ class MeasurementManager:
         if update is None:
             return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
 
-        return self._apply_update(filter_engine, model, update)
+        return self._apply_update(filter_engine, model, update, current_mode=current_mode)
 
     def _apply_update(
         self,
         filter_engine: OfflineESKF,
         model: MeasurementModel,
         update: MeasurementUpdate,
+        current_mode: str | None = None,
     ) -> MeasurementResult:
         policy = model.policy(filter_engine)
-        nis = mahalanobis_squared(update.residual, innovation_covariance(filter_engine, update.H, update.base_R))
+        mode_scale = _mode_measurement_scale(filter_engine, model.name, current_mode)
+        effective_base_R = update.base_R * mode_scale
+        nis = mahalanobis_squared(update.residual, innovation_covariance(filter_engine, update.H, effective_base_R))
 
-        if policy.reject_threshold is not None and nis > policy.reject_threshold:
+        if _policy_enabled(filter_engine, "use_nis_rejection") and policy.reject_threshold is not None and nis > policy.reject_threshold:
             self.reject_streaks[model.name] = self.reject_streaks.get(model.name, 0) + 1
             self.recovery_remaining[model.name] = 0
             return MeasurementResult(
@@ -52,11 +82,17 @@ class MeasurementManager:
                 innovation_value=update.innovation_value,
                 nis=nis,
                 rejected=True,
+                mode_scale=mode_scale,
                 management_mode="reject",
             )
 
         adaptation_scale = 1.0
-        if policy.adapt_threshold is not None and policy.adapt_threshold > 0.0 and nis > policy.adapt_threshold:
+        if (
+            _policy_enabled(filter_engine, "use_adaptive_r")
+            and policy.adapt_threshold is not None
+            and policy.adapt_threshold > 0.0
+            and nis > policy.adapt_threshold
+        ):
             adaptation_scale = nis / policy.adapt_threshold
 
         prior_reject_streak = self.reject_streaks.get(model.name, 0)
@@ -64,7 +100,7 @@ class MeasurementManager:
         management_mode = "update"
         recovery_scale = 1.0
 
-        if policy.recovery_window > 0 and (
+        if _policy_enabled(filter_engine, "use_recovery_scale") and policy.recovery_window > 0 and (
             recovery_remaining > 0 or prior_reject_streak >= policy.recovery_trigger_reject_streak
         ):
             if recovery_remaining <= 0:
@@ -79,8 +115,12 @@ class MeasurementManager:
         else:
             self.recovery_remaining[model.name] = 0
 
-        applied_r_scale = adaptation_scale * recovery_scale
-        filter_engine.apply_linear_update(update.residual, update.H, update.base_R * applied_r_scale)
+        applied_r_scale = adaptation_scale * recovery_scale * mode_scale
+        filter_engine.apply_linear_update(
+            update.residual,
+            update.H,
+            effective_base_R * adaptation_scale * recovery_scale,
+        )
         self.reject_streaks[model.name] = 0
 
         return MeasurementResult(
@@ -91,6 +131,7 @@ class MeasurementManager:
             nis=nis,
             adaptation_scale=adaptation_scale,
             recovery_scale=recovery_scale,
+            mode_scale=mode_scale,
             applied_r_scale=applied_r_scale,
             management_mode=management_mode,
         )

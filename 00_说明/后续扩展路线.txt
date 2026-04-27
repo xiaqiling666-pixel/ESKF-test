@@ -60,10 +60,50 @@
 
 第四步
 在真实日志上做基线对比。
-至少做三组：
-1. 不做拒绝和自适应 R
-2. 做 measurement manager 的基础 gating / adaptive R
-3. 做 measurement manager + 状态机诊断
+当前已经有第一版 `fusion_policy` 开关，
+可以先支持最基础的 ablation：
+1. 关闭 `use_nis_rejection / use_adaptive_r / use_recovery_scale`
+2. 只开启 `use_nis_rejection`
+3. 开启 `use_nis_rejection + use_adaptive_r`
+4. 开启完整 measurement manager 策略
+
+当前已经新增对应实验配置模板：
+1. `config_experiment_baseline_eskf.json`
+2. `config_experiment_nis_reject.json`
+3. `config_experiment_adaptive_r.json`
+4. `config_experiment_adaptive_r_recovery.json`
+5. `config_experiment_full_method.json`
+
+这些模板当前先使用默认 demo 数据，
+目的是固化实验开关和结果目录。
+后面要做真实数据对比时，
+可以复制这些模板并替换 adapter / dataset 配置，
+不要直接覆盖通用默认配置。
+
+当前又新增了批处理入口：
+`python 02_src\run_experiment_batch.py`
+
+这个入口会顺序运行当前实验配置模板，
+并汇总每组 `metrics.csv` 为：
+`03_results_experiment_batch\experiment_metrics_summary.csv`
+
+同时会生成紧凑版：
+`03_results_experiment_batch\experiment_metrics_key_summary.csv`
+
+建议日常先看紧凑版，
+需要追具体原因和状态机细节时，
+再看完整 summary。
+
+这一步的意义是：
+让 baseline / ablation 从“配置文件存在”
+推进到“可以生成统一对比表”。
+
+这里要注意：
+状态机目前仍主要是诊断和统计，
+还没有真正反作用于滤波更新。
+因此不能把“状态机诊断”包装成完整质量驱动融合方法。
+下一步如果要往论文主线走，
+必须让 quality / mode 进入观测权重或准入策略。
 
 第五步
 再考虑加视觉或里程计。

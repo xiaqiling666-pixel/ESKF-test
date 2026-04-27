@@ -1,0 +1,257 @@
+项目完成度评估
+
+评估日期：2026-04-24
+
+一、当前项目定位
+
+当前项目应定位为：
+离线 ESKF 多传感器融合研究原型。
+
+它当前不是：
+1. 实机飞控工程版。
+2. 完整 KF-GINS 复现。
+3. 已经定型的论文算法。
+4. 围绕单一数据集调出来的专用脚本。
+
+当前主线是：
+把 IMU/GNSS/baro/mag 的离线 ESKF 项目框架搭完整，
+让后续真实日志、鲁棒观测管理、退化场景、baseline 对比和方法迭代有稳定承载。
+
+二、已经完成的核心闭环
+
+1. 基础 ESKF 闭环
+   已完成：
+   - 名义状态
+   - 15 维误差状态
+   - IMU 预测
+   - 协方差传播
+   - 线性量测更新
+   - 误差注入
+   - Joseph 更新
+
+2. 观测闭环
+   已完成：
+   - GNSS 位置
+   - GNSS 速度
+   - 气压计高度
+   - 磁航向 yaw
+   - 统一 MeasurementManager
+   - NIS
+   - reject
+   - adaptive R
+   - recovery scale
+   - fusion_policy 开关
+
+3. 初始化闭环
+   已完成：
+   - direct init
+   - bootstrap position pair init
+   - mag yaw heading
+   - GNSS velocity course heading
+   - zero yaw fallback 开关
+   - heading wait timeout
+   - static coarse alignment
+   - 初始化状态摘要
+   - 初始化指标进入 metrics
+
+4. 数据接入闭环
+   已完成：
+   - 统一输入契约
+   - 核心输入 / 可选观测 / 诊断真值分层
+   - standard csv adapter
+   - GREAT-MSF adapter
+   - decoded flight csv adapter
+   - external solution adapter
+   - 输入质量报告
+
+5. 输出和分析闭环
+   已完成：
+   - fusion_output.csv
+   - dataset_source_summary.txt
+   - metrics.csv
+   - metrics_summary.txt
+   - 轨迹图
+   - 误差图
+   - 质量和模式图
+   - 导航诊断图
+   - 协方差诊断图
+   - 状态机摘要图
+
+6. 运行和验收闭环
+   已完成：
+   - requirements.txt
+   - 环境检查脚本
+   - 核心检查脚本
+   - 示例运行脚本
+   - 真实样例运行脚本
+   - 实验模板运行脚本
+   - 单元测试集合
+
+三、当前项目的强项
+
+1. 项目已经不是单文件 demo。
+   目前已经形成较清楚的：
+   `core / measurements / adapters / analysis / tests`
+   分层。
+
+2. 统一输入契约已经建立。
+   这对后续接 PX4、ROS2、Gazebo、VINS、LIO 输出很重要。
+
+3. 观测管理层已经统一。
+   不是每个量测各写一套 reject/adaptive 逻辑，
+   而是通过 MeasurementManager 统一处理。
+
+4. 初始化不再只是硬编码第一帧。
+   当前至少能说明：
+   为什么还没初始化，
+   用什么 heading，
+   是否用了 static alignment，
+   是否触发 fallback。
+
+5. 诊断真值和滤波输入已经分层。
+   这能降低真值污染风险。
+
+6. 日常检查路径比较清楚。
+   当前可以优先跑：
+   `python -m unittest discover 05_tests`
+   或：
+   `04_tools\运行核心检查.bat`
+
+四、当前主要短板
+
+1. 仍是局部 ENU 原型。
+   当前不是完整经纬高导航主线，
+   也不是完整 KF-GINS。
+
+2. 状态维度仍偏基础。
+   当前还没有：
+   - 杆臂
+   - 外参
+   - 时间偏移
+   - 气压计 bias
+   - 磁航向 bias
+   - IMU scale factor
+
+3. 质量评分和状态机还偏诊断。
+   当前还没有真正形成：
+   `quality / mode -> R_eff / gating policy`
+   的闭环方法。
+
+4. 测量模型仍是简化模型。
+   GNSS、baro、mag 当前可以支撑原型，
+   但还不是高保真真实传感器模型。
+
+5. 时间同步和延迟处理还不系统。
+   当前 adapter 有最近邻对齐和容差，
+   但没有完整异步队列、重排序、延迟模拟和时间偏移估计。
+
+6. 对比实验还只是模板。
+   已经有 fusion_policy 和批处理，
+   但还没有系统退化场景和多数据集评估。
+
+7. app.py 仍然偏重。
+   已拆出 exporter 和 initialization_controller，
+   但 record 构造和主循环诊断仍集中在 app.py。
+
+五、当前阶段是否“走偏”
+
+结论：
+前面一度有向实验批处理和代码拆分偏重的趋势，
+但当前已经纠回主线。
+
+合理保留的内容：
+1. fusion_policy
+   因为它提供最基础 ablation 开关。
+
+2. experiment_batch
+   因为它是后续对比实验的辅助工具。
+
+3. exporter / initialization_controller 拆分
+   因为它降低 app.py 风险。
+
+4. input_quality
+   因为它补了真实日志接入前的必要诊断。
+
+需要控制的内容：
+1. 不要继续扩大实验系统。
+2. 不要继续为了拆而拆。
+3. 不要马上追视觉、激光、FGO。
+4. 不要把当前状态机包装成完整创新方法。
+
+六、当前完成度判断
+
+如果按“最小可用离线 ESKF 多源融合框架”评估：
+当前完成度较高。
+
+理由：
+1. 基础 ESKF 已能运行。
+2. 四类常用观测已接入。
+3. 初始化、观测管理、输入契约、结果输出、测试都已有闭环。
+4. 已经能承载真实日志 adapter 验证。
+
+如果按“工程可用无人机导航系统”评估：
+当前完成度仍然较低。
+
+理由：
+1. 没有实时系统。
+2. 没有完整传感器误差建模。
+3. 没有杆臂、外参、时间延迟。
+4. 没有飞控闭环验证。
+
+如果按“论文方法成果”评估：
+当前还不能算闭合。
+
+理由：
+1. 核心创新点还没有数学化。
+2. quality/mode 还没有正式反作用滤波。
+3. 缺系统退化场景。
+4. 缺严肃 baseline / ablation 结果。
+
+七、下一阶段最应该做什么
+
+下一阶段应继续补项目完成度，
+而不是急着扩算法。
+
+建议优先级：
+
+1. 结果阅读链路收口
+   让每个输出文件和指标含义都清楚。
+   当前这一步已经补上第一版。
+
+2. 项目完成度清单维护
+   每完成一块能力，
+   明确它属于：
+   - 基础框架
+   - 样例验证
+   - 研究增强
+   - 长期扩展
+
+3. record 构造收口
+   不是为了拆而拆，
+   而是为了让输出字段有统一定义和可维护入口。
+
+4. adapter 质量报告继续增强
+   后续可以加入：
+   - IMU 幅值范围统计
+   - 角速度幅值范围统计
+   - GNSS 跳变检测
+   - baro 跳变检测
+
+5. 再考虑 quality/mode 反作用 measurement manager
+   这才是后续质量驱动方法的真正入口。
+
+八、当前一句话评价
+
+当前项目已经从“能跑的 demo”
+推进到了“有分层、有输入契约、有初始化管理、有统一观测管理、有结果诊断、有测试的离线 ESKF 多源融合原型”。
+
+但它还不是成熟工程系统，
+也还不是闭合论文方法。
+
+下一步要继续围绕：
+框架完整性、
+输入可靠性、
+输出可解释性、
+测试可回归性
+推进。
+

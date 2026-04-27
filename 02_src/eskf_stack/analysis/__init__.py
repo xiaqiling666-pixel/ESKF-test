@@ -1,4 +1,5 @@
 from .evaluator import compute_metrics, save_metrics
+from .exporter import export_pipeline_results, save_dataset_source_summary
 from .plotter import (
     save_covariance_plot,
     save_error_plot,

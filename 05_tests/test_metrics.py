@@ -13,7 +13,7 @@ SRC_ROOT = PROJECT_ROOT / "02_src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from eskf_stack.analysis.evaluator import compute_metrics, save_metrics
+from eskf_stack.analysis.evaluator import compute_metrics, metric_category, save_metrics
 
 
 class MetricsTests(unittest.TestCase):
@@ -33,6 +33,8 @@ class MetricsTests(unittest.TestCase):
                 "used_gnss_pos": [1, 1, 0, 0, 1],
                 "used_baro": [1, 1, 1, 1, 1],
                 "used_mag": [1, 1, 1, 1, 1],
+                "gnss_pos_mode_scale": [1.0, 2.0, 1.0, 1.0, 1.25],
+                "gnss_vel_mode_scale": [1.0, 1.0, 1.5, 1.0, 1.15],
                 "covariance_health": ["HEALTHY", "HEALTHY", "CAUTION", "UNHEALTHY", "HEALTHY"],
                 "covariance_health_reason": [
                     "nominal",
@@ -95,6 +97,8 @@ class MetricsTests(unittest.TestCase):
         self.assertAlmostEqual(metrics["max_dt_applied_s"], 0.02, places=9)
         self.assertAlmostEqual(metrics["predict_reason_duration_applied_s"], 4.0, places=9)
         self.assertAlmostEqual(metrics["predict_reason_duration_above_max_dt_skipped_s"], 1.0, places=9)
+        self.assertEqual(metrics["gnss_pos_mode_scaled_updates"], 2.0)
+        self.assertEqual(metrics["gnss_vel_mode_scaled_updates"], 2.0)
 
     def test_initialization_summary_metrics(self) -> None:
         result_df = pd.DataFrame(
@@ -159,6 +163,37 @@ class MetricsTests(unittest.TestCase):
         self.assertIn("zero_yaw_fallback_used: yes", summary_text)
         self.assertIn("initialization_wait_s: 1.500000", summary_text)
         self.assertIn("Metric Values", summary_text)
+
+    def test_save_metrics_writes_metric_categories(self) -> None:
+        metrics = {
+            "input_quality_row_count": 2.0,
+            "initialization_completed_flag": 1.0,
+            "position_rmse_m": 0.5,
+            "gnss_pos_rejections": 1.0,
+            "predict_warning_count": 0.0,
+            "covariance_unhealthy_row_count": 0.0,
+            "mode_transition_count": 2.0,
+            "pipeline_runtime_s": 0.01,
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            save_metrics(metrics, output_dir)
+            metrics_frame = pd.read_csv(output_dir / "metrics.csv")
+
+        self.assertEqual(list(metrics_frame.columns), ["metric", "value", "category"])
+        categories = dict(zip(metrics_frame["metric"], metrics_frame["category"], strict=True))
+        self.assertEqual(categories["input_quality_row_count"], "input_quality")
+        self.assertEqual(categories["initialization_completed_flag"], "initialization")
+        self.assertEqual(categories["position_rmse_m"], "estimation_error")
+        self.assertEqual(categories["gnss_pos_rejections"], "measurement_management")
+        self.assertEqual(categories["predict_warning_count"], "prediction_diagnostics")
+        self.assertEqual(categories["covariance_unhealthy_row_count"], "covariance_health")
+        self.assertEqual(categories["mode_transition_count"], "mode_state")
+        self.assertEqual(categories["pipeline_runtime_s"], "runtime")
+
+    def test_metric_category_defaults_unknown_metrics_to_other(self) -> None:
+        self.assertEqual(metric_category("custom_future_metric"), "other")
 
 
 if __name__ == "__main__":

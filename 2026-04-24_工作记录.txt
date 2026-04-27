@@ -1,0 +1,505 @@
+日期
+2026-04-24
+
+项目
+ESKF离线融合项目
+
+今日输入
+今天开始前收到两段严格导师 / 审稿人风格评价。
+核心批评集中在：
+1. 当前更像工程原型框架，不像研究闭环。
+2. 质量评分和状态机仍偏诊断，没有真正反作用于滤波。
+3. 缺少 baseline / ablation。
+4. 测量模型和状态维度仍偏基础。
+5. 初始化仍是多入口和兜底策略，不是严格鲁棒初始化理论。
+6. 工程卫生、依赖和复现性必须继续保持。
+
+今日判断
+1. 采纳：
+   缺少 baseline / ablation 是当前最该立刻补的研究闭环短板。
+2. 采纳：
+   质量评分和状态机目前不能包装成核心创新。
+3. 部分采纳：
+   状态扩维、质量函数数学化、退化场景构造都重要，
+   但今天不一口气推进，避免继续扩大系统复杂度。
+4. 已检查：
+   当前工作区是干净的。
+   `requirements.txt` 已存在。
+   Git 当前未继续跟踪 `__pycache__ / .pyc / 03_results`。
+   因此今天不再把主要时间花在已经收口的仓库卫生问题上。
+
+今日主线
+先把观测管理策略做成可配置实验开关，
+为后续 baseline / ablation 做准备。
+
+今日完成内容
+1. 新增 `fusion_policy` 配置层
+   当前字段：
+   - `use_nis_rejection`
+   - `use_adaptive_r`
+   - `use_recovery_scale`
+
+2. 默认配置保持原行为
+   - `01_data\config.json`
+   - `01_data\config_00000422_decoded.json`
+   默认都开启三个策略开关。
+
+3. MeasurementManager 接入策略开关
+   - 关闭 `use_nis_rejection` 时：
+     NIS 超过 reject 阈值也不会拒绝量测。
+   - 关闭 `use_adaptive_r` 时：
+     NIS 超过 adapt 阈值也不会放大 R。
+   - 关闭 `use_recovery_scale` 时：
+     连续拒绝后的恢复阶段不再渐进放大量测 R。
+
+4. 结果摘要补充策略信息
+   - `dataset_source_summary.txt`
+     现在会写出：
+     `fusion_policy_use_nis_rejection`
+     `fusion_policy_use_adaptive_r`
+     `fusion_policy_use_recovery_scale`
+
+5. 补单元测试
+   - 配置测试确认默认策略开关存在且开启。
+   - MeasurementManager 测试确认：
+     可关闭 NIS rejection
+     可关闭 adaptive R
+     可关闭 recovery scale
+
+6. 文档同步更新
+   - `00_说明\README_先看我.txt`
+   - `00_说明\项目架构说明.txt`
+   - `00_说明\后续扩展路线.txt`
+   - `01_data\配置说明.txt`
+
+7. 新增第一组实验配置模板
+   - `config_experiment_baseline_eskf.json`
+   - `config_experiment_nis_reject.json`
+   - `config_experiment_adaptive_r.json`
+   - `config_experiment_adaptive_r_recovery.json`
+   - `config_experiment_full_method.json`
+   - 这些模板当前先基于默认 demo 数据，
+     只固定 `fusion_policy` 组合和结果目录，
+     为后续同数据源对比实验做准备。
+
+8. 补实验配置模板测试
+   - 确认模板 profile 均为 `experiment`
+   - 确认每个模板的 `fusion_policy` 组合与文件名含义一致
+   - 确认实验配置不会冒充默认通用配置
+
+9. 新增实验批处理入口
+   - 新增：
+     `02_src\eskf_stack\analysis\experiment_batch.py`
+   - 新增：
+     `02_src\run_experiment_batch.py`
+   - 新增：
+     `04_tools\运行实验对比模板.bat`
+   - 当前功能：
+     顺序运行实验配置列表
+     读取每组结果里的 `metrics.csv`
+     汇总为：
+     `experiment_metrics_summary.csv`
+     并额外生成紧凑版：
+     `experiment_metrics_key_summary.csv`
+
+10. 补实验批处理测试
+   - 新增：
+     `05_tests\test_experiment_batch.py`
+   - 测试使用临时目录和假 pipeline
+   - 不运行真实主入口
+   - 不生成真实 `03_results_experiment_*`
+
+11. 实际运行一次实验批处理
+   - 已执行：
+     `python 02_src\run_experiment_batch.py`
+   - 已完成 5 组实验模板运行
+   - 已生成：
+     `03_results_experiment_batch\experiment_metrics_summary.csv`
+   - 检查发现完整 summary 有 114 列，
+     适合机器读取和深查，
+     但不适合作为第一眼人工对比表。
+
+12. 补紧凑版实验汇总表
+   - 新增输出：
+     `experiment_metrics_key_summary.csv`
+   - 当前保留关键字段：
+     策略开关
+     position / velocity / yaw RMSE
+     final position error
+     GNSS 更新与拒绝数
+     adaptive R 使用次数
+     NIS 均值
+     协方差健康计数
+     初始化标志
+     processed rows
+     runtime
+
+13. 回到项目框架收口主线
+   - 用户明确提醒：
+     当前主要任务是完成项目框架，
+     实验只能作为很小的辅助点，
+     不能影响主线。
+   - 因此停止继续扩展实验报告方向，
+     转向 `app.py` 职责拆分。
+
+14. 拆出结果导出职责
+   - 新增：
+     `02_src\eskf_stack\analysis\exporter.py`
+   - 当前负责：
+     保存 `fusion_output.csv`
+     保存 `dataset_source_summary.txt`
+     保存 figures
+     保存 metrics
+   - `app.py` 不再直接负责这些输出细节，
+     只调用 `export_pipeline_results`
+     完成结果导出。
+
+15. 补 exporter 测试
+   - 新增：
+     `05_tests\test_exporter.py`
+   - 覆盖：
+     `dataset_source_summary.txt`
+     中的配置角色
+     fusion policy
+     adapter kind
+     initialization summary
+
+16. 回到项目框架主线，继续拆 `app.py`
+   - 新增：
+     `02_src\eskf_stack\pipeline\initialization_controller.py`
+   - 新增：
+     `02_src\eskf_stack\pipeline\__init__.py`
+   - 将初始化流程控制从 `app.py` 中拆出：
+     heading 来源判断
+     初始化阶段判断
+     静止粗对准评估入口
+     direct 初始化入口
+     bootstrap position pair 初始化入口
+     初始化摘要字段更新
+   - `app.py` 现在通过兼容别名继续暴露：
+     `_assess_initialization_status`
+     `_initialize_filter`
+     `_bootstrap_initialize_from_position_pair`
+     这样现有测试和外部临时调用不会马上断掉。
+
+17. 明确 `pipeline` 边界
+   - `pipeline` 不是新的算法层。
+   - 它只放主流程编排逻辑。
+   - `core.initialization` 仍负责静止粗对准和初始化状态数据结构。
+   - `measurements` 仍负责量测模型和观测管理。
+   - `analysis` 仍负责统计、图表、指标和导出。
+
+18. 回到“完成项目框架”的主线，固化运行环境和验收入口
+   - 更新：
+     `requirements.txt`
+   - 新增：
+     `04_tools\检查运行环境.bat`
+   - 新增：
+     `00_说明\运行环境与验收说明.txt`
+   - 明确：
+     当前最小依赖只包括 `numpy / pandas / matplotlib`
+   - 明确：
+     环境检查入口不会运行主流程，
+     不会生成结果文件。
+   - 明确：
+     `运行核心检查.bat`
+     和
+     `python -m unittest discover 05_tests`
+     是日常低副作用验收入口。
+   - 明确：
+     示例运行、真实样例运行和实验批处理
+     都属于会生成结果文件的入口，
+     不适合当成普通开发检查。
+
+19. 新增 adapter 输入质量报告
+   - 新增：
+     `02_src\eskf_stack\adapters\input_quality.py`
+   - 更新：
+     `02_src\eskf_stack\adapters\loader.py`
+   - 更新：
+     `02_src\eskf_stack\app.py`
+   - 更新：
+     `02_src\eskf_stack\adapters\__init__.py`
+   - 当前每次 `load_dataset_from_config`
+     都会在 adapter 输出标准化后生成：
+     `input_quality_*`
+     摘要字段和 metrics 字段。
+   - 当前覆盖：
+     数据行数
+     必需字段缺失数量
+     可选观测字段缺失数量
+     诊断真值字段缺失数量
+     核心输入完整行比例
+     GNSS 位置覆盖率
+     GNSS 速度覆盖率
+     气压计覆盖率
+     磁航向覆盖率
+     诊断真值覆盖率
+     原始输入时间是否单调
+     重复时间戳数量
+     非正时间步数量
+     最大时间间隔
+     大时间间隔数量
+   - 这些字段会进入：
+     `dataset_source_summary.txt`
+     `metrics.csv`
+     `metrics_summary.txt`
+   - 明确诊断真值角色：
+     `evaluation_only_not_filter_input`
+     防止后续把 `truth_*`
+     误当成滤波观测。
+
+20. 新增运行结果阅读说明
+   - 新增：
+     `00_说明\运行结果阅读说明.txt`
+   - 明确：
+     `dataset_source_summary.txt`
+     `fusion_output.csv`
+     `metrics.csv`
+     `metrics_summary.txt`
+     `figures`
+     分别应该怎么看。
+   - 明确：
+     `input_quality_*`
+     是输入体检指标，
+     不是滤波效果指标。
+   - 明确：
+     `quality_score`
+     和
+     `mode`
+     当前仍主要是诊断，
+     不能包装成完整质量驱动方法。
+   - 明确：
+     发现问题时优先排查顺序是：
+     输入质量
+     初始化
+     dt 传播
+     观测可用/使用/拒绝
+     最后再看 RMSE 和图表。
+
+21. 新增项目完成度评估
+   - 新增：
+     `00_说明\项目完成度评估.txt`
+   - 从三个角度评估当前状态：
+     最小可用离线 ESKF 多源融合框架
+     工程可用无人机导航系统
+     论文方法成果
+   - 当前判断：
+     作为最小可用离线框架，完成度较高；
+     作为实机工程系统，仍然不足；
+     作为论文方法成果，还没有闭合。
+   - 明确下一阶段继续围绕：
+     框架完整性
+     输入可靠性
+     输出可解释性
+     测试可回归性
+     推进。
+
+22. 给 metrics 增加指标分类
+   - 更新：
+     `02_src\eskf_stack\analysis\evaluator.py`
+   - 更新：
+     `05_tests\test_metrics.py`
+   - 更新：
+     `00_说明\运行结果阅读说明.txt`
+   - `metrics.csv`
+     从：
+     `metric,value`
+     扩展为：
+     `metric,value,category`
+   - 当前分类包括：
+     input_quality
+     initialization
+     estimation_error
+     measurement_management
+     prediction_diagnostics
+     covariance_health
+     mode_state
+     navigation_environment
+     runtime
+     other
+   - 这一步不改变任何指标数值，
+     只提高结果表的可读性。
+
+本次主要改动文件
+1. 代码
+   - `02_src\eskf_stack\config.py`
+   - `02_src\eskf_stack\measurements\manager.py`
+   - `02_src\eskf_stack\app.py`
+   - `02_src\eskf_stack\adapters\__init__.py`
+   - `02_src\eskf_stack\adapters\loader.py`
+   - `02_src\eskf_stack\adapters\input_quality.py`
+   - `02_src\eskf_stack\pipeline\__init__.py`
+   - `02_src\eskf_stack\pipeline\initialization_controller.py`
+   - `02_src\eskf_stack\analysis\experiment_batch.py`
+   - `02_src\eskf_stack\analysis\exporter.py`
+   - `02_src\eskf_stack\analysis\evaluator.py`
+   - `requirements.txt`
+   - `02_src\run_experiment_batch.py`
+
+2. 配置
+   - `01_data\config.json`
+   - `01_data\config_00000422_decoded.json`
+   - `01_data\config_experiment_baseline_eskf.json`
+   - `01_data\config_experiment_nis_reject.json`
+   - `01_data\config_experiment_adaptive_r.json`
+   - `01_data\config_experiment_adaptive_r_recovery.json`
+   - `01_data\config_experiment_full_method.json`
+
+3. 测试
+   - `05_tests\test_config.py`
+   - `05_tests\test_measurements.py`
+   - `05_tests\test_adapters.py`
+   - `05_tests\test_metrics.py`
+   - `05_tests\test_experiment_batch.py`
+   - `05_tests\test_exporter.py`
+
+4. 文档
+   - `00_说明\README_先看我.txt`
+   - `00_说明\项目架构说明.txt`
+   - `00_说明\统一输入契约.txt`
+   - `00_说明\运行环境与验收说明.txt`
+   - `00_说明\运行结果阅读说明.txt`
+   - `00_说明\项目完成度评估.txt`
+   - `00_说明\后续扩展路线.txt`
+   - `01_data\配置说明.txt`
+
+5. 工具
+   - `04_tools\运行实验对比模板.bat`
+   - `04_tools\检查运行环境.bat`
+
+当前明确边界
+1. `fusion_policy` 只是 baseline / ablation 开关。
+2. 它不是新的算法创新本身。
+3. 当前 `quality_score` 和状态机仍主要用于诊断与统计。
+4. 后续如果要形成“质量驱动融合方法”，
+   必须让 quality / mode 明确进入观测权重或量测准入策略。
+
+今日验证
+1. `python -m unittest 05_tests.test_config`
+   通过。
+2. `python -m unittest 05_tests.test_measurements`
+   通过。
+3. `python -m unittest 05_tests.test_experiment_batch`
+   通过。
+4. `python -m unittest discover 05_tests`
+   通过。
+5. `python -m unittest 05_tests.test_app`
+   通过。
+6. `python -m unittest 05_tests.test_initialization`
+   通过。
+7. `git diff --check`
+   通过。
+   仅有 Git 提示工作区文件下次写入时 LF 会替换为 CRLF，
+   未发现空白错误。
+8. `python --version`
+   当前本机结果：
+   Python 3.13.2。
+9. `python -c "import numpy, pandas, matplotlib; ..."`
+   当前本机结果：
+   numpy 2.2.4
+   pandas 2.2.3
+   matplotlib 3.10.1。
+10. 当前结果：
+   全量测试通过。
+11. `python -m unittest 05_tests.test_adapters`
+   通过。
+12. `python -m unittest 05_tests.test_exporter`
+   通过。
+13. `python -m unittest 05_tests.test_app`
+   通过。
+14. `python -m unittest discover 05_tests`
+   通过。
+15. `git diff --check`
+   通过。
+   仅有 Git 提示工作区文件下次写入时 LF 会替换为 CRLF，
+   未发现空白错误。
+
+今日发现
+1. 评价中提到的仓库卫生问题已经基本收口：
+   当前 Git 未继续跟踪 `__pycache__ / .pyc / 03_results`。
+2. `fusion_policy` 可以支撑第一层 ablation，
+   但它还没有解决“质量评分和状态机反作用于滤波”的问题。
+3. `config_experiment_full_method.json`
+   当前只是完整原型策略模板，
+   不能把它理解成已经完成的论文完整方法。
+4. 实验批处理属于 analysis / tools 边界，
+   不应该进入 core 或 measurements。
+5. 完整实验汇总表字段太多，
+   需要紧凑版作为人工对比入口。
+6. 实验方向不能继续压过项目框架主线。
+7. `app.py` 仍然偏重，
+   但结果导出和初始化控制已经先从主流程里拆出。
+8. `requirements.txt` 已存在，
+   但此前没有单独的运行环境和验收说明。
+9. 当前代码没有实际使用 `scipy / pyyaml`，
+   因此暂时不把这些库加入依赖，
+   避免依赖范围虚胖。
+10. 之前 adapter 能完成标准化，
+    但缺少统一输入质量报告。
+11. 标准 csv 入口此前会先排序，
+    不利于检查原始输入时间是否单调。
+    当前已改为：
+    先读取原始 csv，
+    再由统一 loader 做标准化和质量报告。
+12. 当前输出文件已经较多，
+    如果没有阅读说明，
+    容易把输入质量、滤波诊断、评估指标混在一起理解。
+13. 当前项目作为离线框架已经有较完整闭环，
+    但作为论文方法和工程系统仍不能过度声明。
+14. `metrics.csv` 指标数量已经变多，
+    如果没有机器可读分类，
+    后续实验汇总和人工阅读都会变得混乱。
+
+当前阶段结论
+1. 项目已经具备第一版 baseline / ablation 配置基础。
+2. 当前可以开始比较：
+   baseline_eskf
+   eskf_nis_reject
+   eskf_adaptive_r
+   eskf_adaptive_r_recovery
+   full_method_current
+3. 这一步仍属于研究证据链建设，
+   不是算法创新本身。
+4. 批处理入口已经把“配置模板”
+   推进到“统一指标汇总表”的第一版。
+5. 当前已经有：
+   完整汇总表
+   紧凑关键指标表
+   两种输出。
+6. 当前项目框架进一步收口：
+   输出职责已经归入 analysis 层。
+7. 初始化流程控制已经归入 pipeline 编排模块，
+   `app.py` 的职责进一步收窄。
+8. 当前补上了环境检查入口和运行验收说明，
+   项目更接近“别人能接手运行”的状态。
+9. 当前补上了 adapter 输入质量报告，
+   真实日志接入前可以先检查输入本身是否可靠。
+10. 当前补上了运行结果阅读说明，
+    输出文件和指标含义更清楚。
+11. 当前补上了项目完成度评估，
+    明确了当前项目的真实位置和后续主线。
+12. 当前 `metrics.csv` 已带指标分类，
+    结果文件自身更容易读，
+    不完全依赖长文字说明。
+
+下一步建议
+1. 继续拆 `app.py`，
+   优先考虑记录构造逻辑。
+2. 但下一步不再优先做纯拆分，
+   优先补项目完成度缺口。
+3. 暂停继续扩展实验报告，
+   只保留当前实验批处理作为辅助验证能力。
+4. 下一步更适合做：
+   继续补 `fusion_output.csv`
+   的字段分组或记录构造清单，
+   但控制篇幅，
+   优先让输出本身更自解释。
+
+今日收尾状态
+1. 已运行实验批处理，
+   生成的 `03_results_experiment_*`
+   属于预期实验产物，
+   当前受 `.gitignore` 忽略。
+2. 未新增源码外的非预期污染。
+3. 今日日志格式已按前一日正式记录风格整理。
