@@ -10,7 +10,12 @@ SRC_ROOT = PROJECT_ROOT / "02_src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from eskf_stack.analysis.quality import CovarianceHealthTracker, SensorFreshnessTracker, classify_covariance_health
+from eskf_stack.analysis.quality import (
+    CovarianceHealthTracker,
+    SensorFreshnessTracker,
+    classify_covariance_health,
+    compute_quality_score,
+)
 from eskf_stack.analysis.state_machine import ModeDecision, ModeStateTracker, ModeThresholds, determine_mode
 
 
@@ -132,6 +137,25 @@ class HealthStateTests(unittest.TestCase):
 
         self.assertEqual(decision.mode, "GNSS_DEGRADED")
         self.assertEqual(decision.reason, "gnss_reject_bypass_streak")
+
+    def test_quality_score_does_not_penalize_missing_auxiliary_when_full_gnss_is_recent(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        snapshot = tracker.snapshot(0.2)
+
+        score = compute_quality_score(
+            snapshot,
+            pos_innovation_norm=0.2,
+            vel_innovation_norm=0.1,
+            baro_innovation_abs=0.0,
+            yaw_innovation_abs_deg=0.0,
+            pos_sigma_norm_m=0.5,
+            vel_sigma_norm_mps=0.2,
+            att_sigma_norm_deg=2.0,
+        )
+
+        self.assertGreaterEqual(score, 75.0)
 
     def test_state_machine_marks_inertial_hold_on_short_outage(self) -> None:
         tracker = SensorFreshnessTracker()

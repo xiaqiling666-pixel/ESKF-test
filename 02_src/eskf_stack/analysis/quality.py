@@ -278,10 +278,13 @@ def compute_quality_score(
     att_sigma_norm_deg: float,
 ) -> float:
     score = 35.0
+    full_gnss_support = sensor_status.recent_gnss_pos and sensor_status.recent_gnss_vel
     gnss_bypass_streak = max(sensor_status.gnss_pos_reject_bypass_streak, sensor_status.gnss_vel_reject_bypass_streak)
     auxiliary_bypass_streak = max(sensor_status.baro_reject_bypass_streak, sensor_status.mag_reject_bypass_streak)
     gnss_adaptive_streak = max(sensor_status.gnss_pos_adaptive_streak, sensor_status.gnss_vel_adaptive_streak)
     auxiliary_adaptive_streak = max(sensor_status.baro_adaptive_streak, sensor_status.mag_adaptive_streak)
+    if full_gnss_support:
+        score += 12.0
     if sensor_status.recent_gnss_pos:
         score += 25.0
     if sensor_status.recent_gnss_vel:
@@ -303,6 +306,6 @@ def compute_quality_score(
     score -= min((sensor_status.baro_reject_streak + sensor_status.mag_reject_streak) * 2.0, 8.0)
     score -= min(auxiliary_bypass_streak * 2.5, 8.0)
     score -= min(auxiliary_adaptive_streak * 2.0, 6.0)
-    if not sensor_status.recent_baro and not sensor_status.recent_mag:
+    if not sensor_status.recent_baro and not sensor_status.recent_mag and not full_gnss_support:
         score -= min(max(sensor_status.auxiliary_outage_s - 0.5, 0.0) * 6.0, 10.0)
     return max(0.0, min(100.0, score))

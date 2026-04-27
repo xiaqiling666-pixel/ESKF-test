@@ -63,6 +63,211 @@
 2. 继续保持单元测试优先，避免运行主入口生成不必要的 03_results。
 3. 如下一轮继续观测管理主线，可检查 experiment key summary 是否需要按输入质量、初始化、观测管理、误差四类拆分输出。
 ============================================================
+时间：2026-04-27 19:27
+任务：收口 MeasurementManager 的 management_mode / recovery_scale 到 metrics 主线
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：MeasurementManager / app pipeline / metrics
+
+一、本轮目标
+- 不拆小修，直接把 measurement policy 的 update / reject / recover / skip 结果完整接进 metrics。
+- 让 recovery_scale 不再只停在逐帧输出里，而是能稳定进入统计层和主线 summary。
+
+二、修改文件
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+三、完成内容
+1. evaluator.py 新增每类传感器的 management_mode 计数统计：update / reject / recover / skip。
+2. evaluator.py 新增 recovery_scale 统计：*_recovery_scaled_updates 和 max_*_recovery_scale。
+3. metrics 现在能明确区分“普通 update”和“recover 阶段 update”，不再只靠 used_* 合并统计。
+4. 新增 app 级 recover 场景测试，锁定 pipeline 会把 gnss_pos_management_mode=recover 和 gnss_pos_recovery_scale 写进输出并进入 metrics。
+5. 扩展 metrics 主测试，锁定 GNSS / baro / mag 的 management_mode 计数和 recovery 统计。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_measurements.MeasurementManagerTests.test_manager_enters_gradual_recovery_after_repeated_rejections 05_tests.test_measurements.MeasurementManagerTests.test_manager_can_disable_recovery_scale_for_ablation
+  python -m unittest 05_tests.test_app.AppInitializationTests.test_pipeline_records_recover_management_mode_and_recovery_metrics
+  python -m unittest 05_tests.test_metrics.MetricsTests.test_mode_duration_and_entry_metrics 05_tests.test_metrics.MetricsTests.test_metric_category_marks_reject_bypass_streak_as_measurement_management 05_tests.test_metrics.MetricsTests.test_save_metrics_groups_mainline_sections_in_summary_text
+- 结果：
+  通过
+- 关键输出：
+  test_measurements：2 项通过
+  test_app：1 项通过
+  test_metrics：3 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查；未新增临时结果目录
+- 是否保留及原因：
+  保留已有 03_results 目录；不是本轮生成的临时结果
+
+六、系统能力提升
+- 现在 MeasurementManager 的 policy 结果已经不只是存在于单帧输出里，update / reject / recover / skip 能稳定进入 metrics。
+- recovery_scale 也真正进入统计层，后续看 GNSS/baro/mag 的恢复阶段行为，不需要再手工翻逐帧 csv。
+
+七、下一步
+1. 继续沿 数据读取 → 初始化 → predict → update → fusion_output.csv → metrics 做漏点排查，优先查多源 update 的交界口径。
+2. 再看是否还有类似“output 有字段、metrics 还没真正接上”的主线断口。
+3. 等最低完整项目再稳一轮后，再集中切回真实数据和实验对比，不提前回 batch 细节。
+============================================================
+时间：2026-04-27 18:42
+任务：收口 GNSS 中断/恢复退化场景的端到端主线行为
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：MeasurementManager / quality / state_machine / app pipeline
+
+一、本轮目标
+- 不做 batch / preview / CLI。
+- 直接验证并收口 GNSS 正常、GNSS 短时中断（有辅助支撑 / 无辅助支撑）、GNSS 恢复 这三条主线场景。
+
+二、修改文件
+- 02_src/eskf_stack/analysis/quality.py
+- 02_src/eskf_stack/analysis/state_machine.py
+- 05_tests/test_app.py
+- 05_tests/test_health_state.py
+- 2026-04-27_工作记录.txt
+
+三、完成内容
+1. 新增 app 级退化场景集成测试：有辅助支撑的短时 GNSS 中断、无辅助支撑的短时 GNSS 中断、degraded 到 recovering 再到 stable 的恢复链。
+2. 修正 quality 逻辑：完整 GNSS 正常时，不再因为缺少辅助源就额外扣 auxiliary outage 分。
+3. 修正 state_machine 逻辑：完整 GNSS 下，单纯 covariance caution 不再过早把系统打进 GNSS_DEGRADED，只有在质量也明显下降时才触发。
+4. 修正 no-GNSS 分支逻辑：短时/中等时长 GNSS 中断下，只要辅助源仍在且协方差没有明显 unhealthy，就允许进入 INERTIAL_HOLD，而不是被 heuristic quality 直接压进 DEGRADED。
+5. 补了 quality 单测，锁定 full-GNSS without auxiliary 仍可保持稳定基线。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_app.AppInitializationTests.test_pipeline_enters_inertial_hold_on_short_gnss_outage_with_aux_support 05_tests.test_app.AppInitializationTests.test_pipeline_enters_degraded_on_short_gnss_outage_without_aux_support 05_tests.test_app.AppInitializationTests.test_pipeline_transitions_from_degraded_to_recovering_and_back_to_stable 05_tests.test_app.AppInitializationTests.test_pipeline_escalates_repeated_gnss_reject_bypass_to_degraded_mode
+  python -m unittest 05_tests.test_health_state.HealthStateTests.test_quality_score_does_not_penalize_missing_auxiliary_when_full_gnss_is_recent 05_tests.test_health_state.HealthStateTests.test_state_machine_marks_gnss_degraded_on_reject_bypass_streak 05_tests.test_health_state.HealthStateTests.test_state_machine_marks_inertial_hold_on_short_outage 05_tests.test_health_state.HealthStateTests.test_state_machine_degrades_short_gnss_outage_without_auxiliary_support
+  python -m unittest 05_tests.test_metrics.MetricsTests.test_mode_duration_and_entry_metrics
+- 结果：
+  通过
+- 关键输出：
+  test_app：4 项通过
+  test_health_state：4 项通过
+  test_metrics：1 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查；未新增临时结果目录
+- 是否保留及原因：
+  保留已有 03_results 目录；不是本轮生成的临时结果
+
+六、系统能力提升
+- 最低完整主线现在不再默认“没有辅助源就先退化”，GNSS-only 稳定场景能被系统当作正常工作状态处理。
+- 短时 GNSS 中断时，系统已经能区分“有辅助支撑进入 INERTIAL_HOLD”和“无辅助支撑进入 DEGRADED”。
+- GNSS 恢复后，degraded → recovering → stable 这条主线行为已经有 app 级集成测试锁住。
+
+七、下一步
+1. 继续沿 数据读取 → 初始化 → predict → update → fusion_output.csv → metrics 做漏点排查，优先看多源 update 交界处还有没有口径断口。
+2. 再检查 quality/state_machine 里剩余的硬阈值，哪些还需要继续按主线行为收口。
+3. 在最低完整项目接近收尾后，再集中做真实数据和实验对比，不提前把精力拉回 batch 细节。
+============================================================
+时间：2026-04-27 18:35
+任务：按主线归并 metrics_summary 并补相关汇总测试
+阶段：阶段 1 / 最低完整项目闭环
+主线模块：metrics / 输出汇总
+
+一、本轮目标
+- 不做 batch / manifest / preview。
+- 把 metrics_summary 按 initialization / GNSS / baro / mag / quality / covariance / mode / prediction / runtime 主线归并，顺手确认新的 bypass/adaptive 指标没有漏出主线汇总。
+
+二、修改文件
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+三、完成内容
+1. evaluator.py 新增 metrics_summary 分组逻辑，不再只按原始字典顺序平铺所有 metric。
+2. summary 现在按 Initialization / GNSS / Barometer / Magnetometer / Quality / Covariance / Mode / Prediction / Runtime 等主线 section 输出。
+3. GNSS/baro/mag 的 reject bypass、adaptive、outage 等指标现在会稳定落到对应主线 section，不再埋在长列表里。
+4. 新增 metrics summary 文本测试，锁定主线 section 标题和关键传感器指标确实写入对应 section。
+5. 把相关 save_metrics 测试从系统临时目录切到工作区临时目录，避开 Windows Temp 权限导致的假红。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_metrics.MetricsTests.test_save_metrics_writes_human_readable_initialization_summary 05_tests.test_metrics.MetricsTests.test_save_metrics_writes_metric_categories 05_tests.test_metrics.MetricsTests.test_save_metrics_groups_mainline_sections_in_summary_text 05_tests.test_metrics.MetricsTests.test_mode_duration_and_entry_metrics
+- 结果：
+  通过
+- 关键输出：
+  test_metrics：4 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查；未新增临时结果目录
+- 是否保留及原因：
+  保留已有 03_results 目录；不是本轮生成的临时结果
+
+六、系统能力提升
+- metrics_summary 现在开始真正服务主线验收，初始化、GNSS、baro、mag、协方差等信息更容易顺着系统链路读，而不是在一堆裸 metric 里找。
+- 这也让最近几轮补进来的 reject bypass / adaptive / outage 指标真正进入可读的主线汇总，不再只有 csv 才能看清。
+
+七、下一步
+1. 继续检查最低完整主线里还有没有“主线行为已经发生，但 summary 或 metrics 还不够直接”的断口。
+2. 沿 数据读取 → 初始化 → predict → update → fusion_output.csv → metrics 再做一轮漏点排查，优先看初始化后首个 update 和多源 update 交界处。
+3. 继续对齐 MeasurementManager / quality / state_machine 的主线口径，必要时补更贴近退化场景的测试。
+============================================================
+时间：2026-04-27 18:15
+任务：把 reject_bypassed 连续触发真正接回退化判断主线
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：MeasurementManager → quality/state_machine → fusion_output.csv → metrics
+
+一、本轮目标
+- 不做 batch / CLI / preview。
+- 让 repeated reject_bypassed 不再只停留在 manager 内部，而是真正进入 quality、mode、输出和 metrics。
+
+二、修改文件
+- 02_src/eskf_stack/analysis/quality.py
+- 02_src/eskf_stack/analysis/state_machine.py
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+
+三、完成内容
+1. SensorFreshnessTracker 新增四类传感器的 reject_bypass_streak，并让 note_result 接收 reject_bypassed。
+2. quality score 新增 gnss / auxiliary reject bypass streak 惩罚，不再只看 reject 和 adaptive。
+3. state_machine 新增 reject bypass streak 退化判定，并把相关阈值纳入 ModeThresholds。
+4. app.py 把 reject_bypassed 传给 freshness tracker，并把四类传感器的 reject_bypass_streak 写入逐帧输出。
+5. evaluator.py 新增 max_*_reject_bypass_streak，并归入 measurement_management。
+6. 新增/补强 health_state、app、metrics 三层测试，锁 repeated bypass 会进入 mode reason、逐帧输出和 metrics。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_health_state.HealthStateTests.test_state_machine_marks_gnss_degraded_on_reject_bypass_streak
+  python -m unittest 05_tests.test_app.AppInitializationTests.test_pipeline_records_reject_bypass_for_gnss_measurements 05_tests.test_app.AppInitializationTests.test_pipeline_escalates_repeated_gnss_reject_bypass_to_degraded_mode
+  python -m unittest 05_tests.test_metrics.MetricsTests.test_mode_duration_and_entry_metrics 05_tests.test_metrics.MetricsTests.test_reject_policy_bypass_metrics_capture_disabled_rejection_case 05_tests.test_metrics.MetricsTests.test_metric_category_marks_reject_bypass_streak_as_measurement_management
+- 结果：
+  通过
+- 关键输出：
+  health_state：1 项通过
+  test_app：2 项通过
+  test_metrics：3 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查；未新增临时结果目录
+- 是否保留及原因：
+  保留已有 03_results 目录；不是本轮生成的临时结果
+
+六、系统能力提升
+- 现在“超过 reject 阈值但被策略放行”的连续现象不再只是 manager 内部细节，而是会真正影响 quality 和 mode。
+- 这让退化处理更接近真实主线行为，而不是靠下游反推 manager 做了什么。
+
+七、下一步
+1. 继续检查最低完整主线里还有没有类似“策略真实发生了，但下游只能反推”的断口。
+2. 回到 metrics_summary 主线归并，按 initialization / GNSS / baro / mag / covariance 做更清楚的汇总组织，但只改汇总逻辑。
+3. 继续沿 数据读取 → 初始化 → predict → update → fusion_output.csv → metrics 做漏点检查，优先找主线数值和验证断口。
+============================================================
 ============================================================
 时间：2026-04-27 11:07
 任务：补记 baro / mag NIS 指标任务的 AGENTS.md 规范记录

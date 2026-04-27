@@ -184,6 +184,72 @@ def _format_initialization_summary(initialization_summary: dict[str, object] | N
     return lines
 
 
+def _metric_section_name(metric_name: str) -> str:
+    if metric_name.startswith("initialization_"):
+        return "Initialization Metrics"
+    if metric_name.startswith("gnss_") or metric_name.startswith("mean_gnss_") or metric_name.startswith("max_gnss_"):
+        return "GNSS Metrics"
+    if metric_name.startswith("baro_") or metric_name.startswith("mean_baro_") or metric_name.startswith("max_baro_"):
+        return "Barometer Metrics"
+    if metric_name.startswith("mag_") or metric_name.startswith("mean_mag_") or metric_name.startswith("max_mag_"):
+        return "Magnetometer Metrics"
+    if metric_name == "mean_quality_score" or metric_name.startswith("auxiliary_"):
+        return "Quality Metrics"
+    category = metric_category(metric_name)
+    if category == "covariance_health":
+        return "Covariance Metrics"
+    if category == "mode_state":
+        return "Mode Metrics"
+    if category == "prediction_diagnostics":
+        return "Prediction Metrics"
+    if category == "estimation_error":
+        return "Estimation Error Metrics"
+    if category == "input_quality":
+        return "Input Quality Metrics"
+    if category == "navigation_environment":
+        return "Navigation Environment Metrics"
+    if category == "runtime":
+        return "Runtime Metrics"
+    return "Other Metrics"
+
+
+def _metric_section_sort_key(metric_name: str) -> tuple[int, str]:
+    section_order = {
+        "Initialization Metrics": 0,
+        "GNSS Metrics": 1,
+        "Barometer Metrics": 2,
+        "Magnetometer Metrics": 3,
+        "Quality Metrics": 4,
+        "Covariance Metrics": 5,
+        "Mode Metrics": 6,
+        "Prediction Metrics": 7,
+        "Estimation Error Metrics": 8,
+        "Input Quality Metrics": 9,
+        "Navigation Environment Metrics": 10,
+        "Runtime Metrics": 11,
+        "Other Metrics": 12,
+    }
+    section_name = _metric_section_name(metric_name)
+    return (section_order.get(section_name, 99), metric_name)
+
+
+def _format_metric_sections(metrics: dict[str, float]) -> list[str]:
+    sectioned_metrics: dict[str, list[tuple[str, float]]] = {}
+    for metric_name, metric_value in sorted(metrics.items(), key=lambda item: _metric_section_sort_key(item[0])):
+        section_name = _metric_section_name(metric_name)
+        sectioned_metrics.setdefault(section_name, []).append((metric_name, metric_value))
+
+    lines: list[str] = ["Metric Values", ""]
+    for index, (section_name, section_metrics) in enumerate(sectioned_metrics.items()):
+        lines.append(section_name)
+        lines.append("")
+        for metric_name, metric_value in section_metrics:
+            lines.append(f"{metric_name}: {metric_value:.6f}")
+        if index != len(sectioned_metrics) - 1:
+            lines.append("")
+    return lines
+
+
 def _sample_durations(time_series: pd.Series) -> pd.Series:
     if len(time_series) <= 1:
         return pd.Series([0.0] * len(time_series), index=time_series.index, dtype=float)
@@ -283,6 +349,37 @@ def _add_reject_bypass_metrics(metrics: dict[str, float], result_df: pd.DataFram
     metrics[f"{sensor_name}_nis_reject_policy_bypass_count"] = bypassed_count
     if reject_exceed_key in metrics and metrics[reject_exceed_key] > 0.0:
         metrics[f"{sensor_name}_nis_reject_policy_bypass_pct"] = 100.0 * bypassed_count / metrics[reject_exceed_key]
+
+
+def _add_management_mode_metrics(metrics: dict[str, float], result_df: pd.DataFrame, sensor_name: str) -> None:
+    management_mode_column = f"{sensor_name}_management_mode"
+    if management_mode_column not in result_df.columns:
+        return
+
+    management_modes = result_df[management_mode_column].fillna("").astype(str)
+    for mode_name in ("update", "reject", "recover", "skip"):
+        metrics[f"{sensor_name}_management_count_{mode_name}"] = float((management_modes == mode_name).sum())
+
+
+def _add_recovery_scale_metrics(
+    metrics: dict[str, float],
+    result_df: pd.DataFrame,
+    sensor_name: str,
+    used_column: str | None = None,
+) -> None:
+    recovery_scale_column = f"{sensor_name}_recovery_scale"
+    if recovery_scale_column not in result_df.columns:
+        return
+
+    used_mask = pd.Series([True] * len(result_df), index=result_df.index)
+    if used_column is not None and used_column in result_df.columns:
+        used_mask = result_df[used_column].astype(bool)
+
+    recovery_scale_values = pd.to_numeric(result_df[recovery_scale_column], errors="coerce")
+    recovery_scaled_mask = recovery_scale_values > 1.0
+    metrics[f"{sensor_name}_recovery_scaled_updates"] = float((recovery_scaled_mask & used_mask).sum())
+    if recovery_scale_values.notna().any():
+        metrics[f"max_{sensor_name}_recovery_scale"] = float(recovery_scale_values.max())
 
 
 def _bool_column_sum(result_df: pd.DataFrame, column_name: str) -> float:
@@ -396,10 +493,15 @@ def compute_metrics(
     metrics["mag_updates"] = _bool_column_sum(result_df, "used_mag")
     for sensor_name in ("gnss_pos", "gnss_vel", "baro", "mag"):
         _add_rejection_metrics(metrics, result_df, sensor_name)
+        _add_management_mode_metrics(metrics, result_df, sensor_name)
     _add_adaptive_r_metrics(metrics, result_df, "gnss_pos", "used_gnss_pos")
     _add_adaptive_r_metrics(metrics, result_df, "gnss_vel", "used_gnss_vel")
     _add_adaptive_r_metrics(metrics, result_df, "baro", "used_baro")
     _add_adaptive_r_metrics(metrics, result_df, "mag", "used_mag")
+    _add_recovery_scale_metrics(metrics, result_df, "gnss_pos", "used_gnss_pos")
+    _add_recovery_scale_metrics(metrics, result_df, "gnss_vel", "used_gnss_vel")
+    _add_recovery_scale_metrics(metrics, result_df, "baro", "used_baro")
+    _add_recovery_scale_metrics(metrics, result_df, "mag", "used_mag")
     _add_mode_scale_metrics(metrics, result_df, "gnss_pos", "used_gnss_pos", "gnss_pos_rejected")
     _add_mode_scale_metrics(metrics, result_df, "gnss_vel", "used_gnss_vel", "gnss_vel_rejected")
     for sensor_name in ("gnss_pos", "gnss_vel", "baro", "mag"):
@@ -519,8 +621,5 @@ def save_metrics(
     if initialization_lines:
         lines.extend(initialization_lines)
         lines.append("")
-        lines.append("Metric Values")
-        lines.append("")
-    for metric_name, metric_value in metrics.items():
-        lines.append(f"{metric_name}: {metric_value:.6f}")
+    lines.extend(_format_metric_sections(metrics))
     (output_dir / "metrics_summary.txt").write_text("\n".join(lines), encoding="utf-8")

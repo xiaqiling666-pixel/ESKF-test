@@ -176,9 +176,9 @@ def determine_mode(
             return ModeDecision("GNSS_DEGRADED", "gnss_reject_bypass_streak")
         if gnss_adaptive_streak >= thresholds.gnss_adaptive_streak_degraded and quality_score < 75.0:
             return ModeDecision("GNSS_DEGRADED", "gnss_adaptive_scaling_streak")
-        if quality_score < 75.0:
+        if quality_score < 65.0:
             return ModeDecision("GNSS_DEGRADED", "quality_drop_under_gnss")
-        if covariance_caution and persistent_caution:
+        if covariance_caution and persistent_caution and quality_score < 65.0:
             return ModeDecision("GNSS_DEGRADED", covariance_health.reason)
         return ModeDecision("GNSS_STABLE", "fresh_gnss_and_healthy_covariance")
 
@@ -209,7 +209,7 @@ def determine_mode(
         or auxiliary_adaptive_streak >= thresholds.auxiliary_adaptive_streak_degraded
     ) and quality_score < 45.0:
         return ModeDecision("DEGRADED", "auxiliary_sensor_instability")
-    if sensor_status.gnss_outage_s <= 2.0 and quality_score >= 45.0 and not persistent_unhealthy:
+    if sensor_status.gnss_outage_s <= 2.0 and recent_any_auxiliary and not persistent_unhealthy:
         return ModeDecision("INERTIAL_HOLD", "short_gnss_outage")
     if sensor_status.gnss_outage_s <= 5.0 and not recent_any_auxiliary and sensor_status.auxiliary_outage_s > 1.0:
         return ModeDecision("DEGRADED", "extended_outage_without_aux_support")
@@ -219,7 +219,7 @@ def determine_mode(
         or auxiliary_adaptive_streak >= thresholds.auxiliary_adaptive_streak_degraded
     ) and quality_score < 35.0:
         return ModeDecision("DEGRADED", "auxiliary_sensor_instability")
-    if sensor_status.gnss_outage_s <= 5.0 and quality_score >= 35.0 and not persistent_unhealthy:
+    if sensor_status.gnss_outage_s <= 5.0 and recent_any_auxiliary and not persistent_unhealthy:
         return ModeDecision("INERTIAL_HOLD", "extended_gnss_outage")
     if covariance_unhealthy and persistent_unhealthy:
         return ModeDecision("DEGRADED", covariance_health.reason)

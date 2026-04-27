@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import shutil
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -23,6 +23,14 @@ from eskf_stack.analysis.evaluator import (
 
 
 class MetricsTests(unittest.TestCase):
+    def _workspace_temp_dir(self, name: str) -> Path:
+        temp_dir = PROJECT_ROOT / "_tmp_test_metrics" / name
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        return temp_dir
+
     def test_mode_duration_and_entry_metrics(self) -> None:
         result_df = pd.DataFrame(
             {
@@ -48,6 +56,10 @@ class MetricsTests(unittest.TestCase):
                 "gnss_vel_reject_streak": [0, 0, 0, 0, 0],
                 "baro_reject_streak": [0, 1, 0, 0, 0],
                 "mag_reject_streak": [0, 0, 1, 0, 0],
+                "gnss_pos_reject_bypass_streak": [0, 1, 2, 0, 0],
+                "gnss_vel_reject_bypass_streak": [0, 0, 0, 0, 1],
+                "baro_reject_bypass_streak": [0, 0, 0, 1, 0],
+                "mag_reject_bypass_streak": [0, 0, 0, 0, 0],
                 "gnss_pos_adaptive_streak": [0, 1, 2, 0, 0],
                 "gnss_vel_adaptive_streak": [0, 0, 0, 0, 1],
                 "baro_adaptive_streak": [0, 1, 0, 2, 0],
@@ -69,10 +81,18 @@ class MetricsTests(unittest.TestCase):
                 "gnss_vel_adaptation_scale": [1.0, 1.0, 1.0, 1.0, 1.6],
                 "gnss_pos_rejected": [False, False, False, False, True],
                 "gnss_vel_rejected": [False, False, False, False, False],
+                "gnss_pos_management_mode": ["update", "update", "skip", "skip", "reject"],
+                "gnss_vel_management_mode": ["skip", "skip", "recover", "skip", "update"],
+                "gnss_pos_recovery_scale": [1.0, 1.0, 1.0, 1.0, 1.0],
+                "gnss_vel_recovery_scale": [1.0, 1.0, 2.0, 1.0, 1.0],
                 "baro_adaptation_scale": [1.0, 2.0, 1.0, 1.4, 1.0],
                 "mag_adaptation_scale": [1.0, 1.2, 2.0, 1.0, 1.0],
                 "baro_rejected": [False, True, False, False, False],
                 "mag_rejected": [False, False, True, False, False],
+                "baro_management_mode": ["update", "reject", "skip", "recover", "update"],
+                "mag_management_mode": ["update", "skip", "reject", "update", "update"],
+                "baro_recovery_scale": [1.0, 1.0, 1.0, 1.5, 1.0],
+                "mag_recovery_scale": [1.0, 1.0, 1.0, 1.0, 1.0],
                 "gnss_pos_nis": [1.0, 2.0, float("nan"), 4.0, 5.0],
                 "gnss_vel_nis": [float("nan"), 1.5, 2.5, 3.5, 4.5],
                 "baro_nis": [0.5, 1.5, float("nan"), 2.5, 3.5],
@@ -152,13 +172,27 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["gnss_pos_mode_scaled_rejections"], 1.0)
         self.assertEqual(metrics["gnss_pos_available_measurements"], 4.0)
         self.assertEqual(metrics["gnss_pos_updates"], 2.0)
+        self.assertEqual(metrics["gnss_pos_management_count_update"], 2.0)
+        self.assertEqual(metrics["gnss_pos_management_count_reject"], 1.0)
+        self.assertEqual(metrics["gnss_pos_management_count_recover"], 0.0)
+        self.assertEqual(metrics["gnss_pos_management_count_skip"], 2.0)
         self.assertEqual(metrics["max_gnss_pos_reject_streak"], 1.0)
+        self.assertEqual(metrics["max_gnss_pos_reject_bypass_streak"], 2.0)
         self.assertEqual(metrics["max_gnss_pos_adaptive_streak"], 2.0)
+        self.assertEqual(metrics["gnss_pos_recovery_scaled_updates"], 0.0)
+        self.assertEqual(metrics["max_gnss_pos_recovery_scale"], 1.0)
         self.assertAlmostEqual(metrics["max_gnss_pos_outage_s"], 3.0, places=9)
         self.assertEqual(metrics["gnss_vel_available_measurements"], 4.0)
         self.assertEqual(metrics["gnss_vel_updates"], 2.0)
+        self.assertEqual(metrics["gnss_vel_management_count_update"], 1.0)
+        self.assertEqual(metrics["gnss_vel_management_count_reject"], 0.0)
+        self.assertEqual(metrics["gnss_vel_management_count_recover"], 1.0)
+        self.assertEqual(metrics["gnss_vel_management_count_skip"], 3.0)
         self.assertEqual(metrics["max_gnss_vel_reject_streak"], 0.0)
+        self.assertEqual(metrics["max_gnss_vel_reject_bypass_streak"], 1.0)
         self.assertEqual(metrics["max_gnss_vel_adaptive_streak"], 1.0)
+        self.assertEqual(metrics["gnss_vel_recovery_scaled_updates"], 1.0)
+        self.assertEqual(metrics["max_gnss_vel_recovery_scale"], 2.0)
         self.assertTrue(metrics["max_gnss_vel_outage_s"] > 1e6)
         self.assertEqual(metrics["gnss_vel_mode_scaled_measurements"], 2.0)
         self.assertEqual(metrics["gnss_vel_mode_scaled_updates"], 2.0)
@@ -167,13 +201,27 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["gnss_vel_adapted_updates"], 1.0)
         self.assertEqual(metrics["baro_available_measurements"], 4.0)
         self.assertEqual(metrics["baro_updates"], 4.0)
+        self.assertEqual(metrics["baro_management_count_update"], 2.0)
+        self.assertEqual(metrics["baro_management_count_reject"], 1.0)
+        self.assertEqual(metrics["baro_management_count_recover"], 1.0)
+        self.assertEqual(metrics["baro_management_count_skip"], 1.0)
         self.assertEqual(metrics["max_baro_reject_streak"], 1.0)
+        self.assertEqual(metrics["max_baro_reject_bypass_streak"], 1.0)
         self.assertEqual(metrics["max_baro_adaptive_streak"], 2.0)
+        self.assertEqual(metrics["baro_recovery_scaled_updates"], 1.0)
+        self.assertEqual(metrics["max_baro_recovery_scale"], 1.5)
         self.assertAlmostEqual(metrics["max_baro_outage_s"], 2.0, places=9)
         self.assertEqual(metrics["mag_available_measurements"], 4.0)
         self.assertEqual(metrics["mag_updates"], 4.0)
+        self.assertEqual(metrics["mag_management_count_update"], 3.0)
+        self.assertEqual(metrics["mag_management_count_reject"], 1.0)
+        self.assertEqual(metrics["mag_management_count_recover"], 0.0)
+        self.assertEqual(metrics["mag_management_count_skip"], 1.0)
         self.assertEqual(metrics["max_mag_reject_streak"], 1.0)
+        self.assertEqual(metrics["max_mag_reject_bypass_streak"], 0.0)
         self.assertEqual(metrics["max_mag_adaptive_streak"], 1.0)
+        self.assertEqual(metrics["mag_recovery_scaled_updates"], 0.0)
+        self.assertEqual(metrics["max_mag_recovery_scale"], 1.0)
         self.assertAlmostEqual(metrics["max_mag_outage_s"], 1.0, places=9)
         self.assertAlmostEqual(metrics["max_auxiliary_outage_s"], 0.0, places=9)
         self.assertEqual(metrics["baro_rejections"], 1.0)
@@ -335,6 +383,7 @@ class MetricsTests(unittest.TestCase):
             "initialization_mode_direct_flag": 1.0,
             "initialization_zero_yaw_fallback_used_flag": 1.0,
             "initialization_wait_s": 1.5,
+            "gnss_pos_updates": 2.0,
         }
         initialization_summary = {
             "initialization_phase": "INITIALIZED",
@@ -347,10 +396,9 @@ class MetricsTests(unittest.TestCase):
             "initialization_wait_s": "1.500000",
         }
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = Path(temp_dir)
-            save_metrics(metrics, output_dir, initialization_summary=initialization_summary)
-            summary_text = (output_dir / "metrics_summary.txt").read_text(encoding="utf-8")
+        output_dir = self._workspace_temp_dir("save_metrics_initialization_summary")
+        save_metrics(metrics, output_dir, initialization_summary=initialization_summary)
+        summary_text = (output_dir / "metrics_summary.txt").read_text(encoding="utf-8")
 
         self.assertIn("Initialization Summary", summary_text)
         self.assertIn("phase: INITIALIZED", summary_text)
@@ -362,6 +410,8 @@ class MetricsTests(unittest.TestCase):
         self.assertIn("zero_yaw_fallback_used: yes", summary_text)
         self.assertIn("initialization_wait_s: 1.500000", summary_text)
         self.assertIn("Metric Values", summary_text)
+        self.assertIn("Initialization Metrics", summary_text)
+        self.assertIn("GNSS Metrics", summary_text)
 
     def test_save_metrics_writes_metric_categories(self) -> None:
         metrics = {
@@ -391,10 +441,9 @@ class MetricsTests(unittest.TestCase):
             "pipeline_runtime_s": 0.01,
         }
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = Path(temp_dir)
-            save_metrics(metrics, output_dir)
-            metrics_frame = pd.read_csv(output_dir / "metrics.csv")
+        output_dir = self._workspace_temp_dir("save_metrics_metric_categories")
+        save_metrics(metrics, output_dir)
+        metrics_frame = pd.read_csv(output_dir / "metrics.csv")
 
         self.assertEqual(list(metrics_frame.columns), ["metric", "value", "category"])
         categories = dict(zip(metrics_frame["metric"], metrics_frame["category"], strict=True))
@@ -423,8 +472,45 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(categories["mode_transition_count"], "mode_state")
         self.assertEqual(categories["pipeline_runtime_s"], "runtime")
 
+    def test_save_metrics_groups_mainline_sections_in_summary_text(self) -> None:
+        metrics = {
+            "initialization_completed_flag": 1.0,
+            "gnss_pos_reject_bypassed_updates": 2.0,
+            "max_gnss_pos_reject_bypass_streak": 3.0,
+            "baro_adapted_updates": 1.0,
+            "mag_rejections": 1.0,
+            "mean_quality_score": 81.5,
+            "covariance_unhealthy_row_count": 0.0,
+            "mode_transition_count": 2.0,
+            "predict_warning_count": 1.0,
+            "pipeline_runtime_s": 0.02,
+        }
+
+        output_dir = self._workspace_temp_dir("save_metrics_summary_sections")
+        save_metrics(metrics, output_dir)
+        summary_text = (output_dir / "metrics_summary.txt").read_text(encoding="utf-8")
+
+        self.assertIn("Initialization Metrics", summary_text)
+        self.assertIn("GNSS Metrics", summary_text)
+        self.assertIn("Barometer Metrics", summary_text)
+        self.assertIn("Magnetometer Metrics", summary_text)
+        self.assertIn("Quality Metrics", summary_text)
+        self.assertIn("Covariance Metrics", summary_text)
+        self.assertIn("Mode Metrics", summary_text)
+        self.assertIn("Prediction Metrics", summary_text)
+        self.assertIn("Runtime Metrics", summary_text)
+        self.assertIn("gnss_pos_reject_bypassed_updates: 2.000000", summary_text)
+        self.assertIn("max_gnss_pos_reject_bypass_streak: 3.000000", summary_text)
+        self.assertIn("baro_adapted_updates: 1.000000", summary_text)
+
     def test_metric_category_defaults_unknown_metrics_to_other(self) -> None:
         self.assertEqual(metric_category("custom_future_metric"), "other")
+
+    def test_metric_category_marks_reject_bypass_streak_as_measurement_management(self) -> None:
+        self.assertEqual(metric_category("max_gnss_pos_reject_bypass_streak"), "measurement_management")
+        self.assertEqual(metric_category("max_baro_reject_bypass_streak"), "measurement_management")
+        self.assertEqual(metric_category("gnss_pos_management_count_recover"), "measurement_management")
+        self.assertEqual(metric_category("baro_recovery_scaled_updates"), "measurement_management")
 
     def test_metric_supports_experiment_delta_matches_supported_categories(self) -> None:
         self.assertTrue(metric_supports_experiment_delta("position_rmse_m"))
