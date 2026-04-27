@@ -27,7 +27,9 @@
   },
   "measurement_noise": {
     "gnss_pos_std": 0.8,
+    "gnss_pos_vertical_std": 1.6,
     "gnss_vel_std": 0.2,
+    "gnss_vel_vertical_std": 0.4,
     "baro_std": 0.35,
     "yaw_std_deg": 3.0
   },

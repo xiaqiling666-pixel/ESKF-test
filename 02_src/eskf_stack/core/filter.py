@@ -10,6 +10,7 @@ from .math_utils import (
     quat_multiply,
     quat_normalize,
     rotvec_to_quat,
+    solve_linear_system,
     skew,
 )
 from .mechanization import mechanize_local_frame
@@ -225,10 +226,8 @@ class OfflineESKF:
 
     def apply_linear_update(self, residual: np.ndarray, H: np.ndarray, R: np.ndarray) -> None:
         s_matrix = H @ self.P @ H.T + R
-        try:
-            kalman_gain = self.P @ H.T @ np.linalg.inv(s_matrix)
-        except np.linalg.LinAlgError:
-            kalman_gain = self.P @ H.T @ np.linalg.pinv(s_matrix)
+        cross_covariance = self.P @ H.T
+        kalman_gain = solve_linear_system(s_matrix, cross_covariance.T).T
         delta_x = kalman_gain @ residual
         identity = np.eye(ERROR_STATE_DIM)
         joseph = identity - kalman_gain @ H

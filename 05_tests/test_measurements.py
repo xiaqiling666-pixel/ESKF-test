@@ -15,7 +15,12 @@ if str(SRC_ROOT) not in sys.path:
 from eskf_stack.adapters.csv_dataset import ObservationFrame
 from eskf_stack.config import load_config
 from eskf_stack.core.state import ERROR_STATE_DIM
-from eskf_stack.measurements import BarometerMeasurement, MagYawMeasurement
+from eskf_stack.measurements import (
+    BarometerMeasurement,
+    GnssPositionMeasurement,
+    GnssVelocityMeasurement,
+    MagYawMeasurement,
+)
 from eskf_stack.measurements.base import MeasurementModel, MeasurementPolicy, MeasurementUpdate
 from eskf_stack.measurements.manager import MeasurementManager
 
@@ -114,10 +119,34 @@ class MeasurementManagerTests(unittest.TestCase):
 
         self.assertTrue(result.used)
         self.assertFalse(result.rejected)
+        self.assertTrue(result.reject_bypassed)
         self.assertEqual(result.management_mode, "update")
         self.assertAlmostEqual(result.nis, 25.0, places=6)
         self.assertAlmostEqual(result.applied_r_scale, 1.0, places=6)
         self.assertAlmostEqual(float(self.filter_engine.last_R[0, 0]), 1.0, places=6)
+
+    def test_manager_marks_reject_bypass_when_rejection_disabled_and_adaptive_enabled(self) -> None:
+        self.filter_engine.config = replace(
+            self.config,
+            fusion_policy=replace(self.config.fusion_policy, use_nis_rejection=False, use_adaptive_r=True, use_recovery_scale=False),
+        )
+        model = DummyMeasurement(
+            residual_value=5.0,
+            policy=MeasurementPolicy(adapt_threshold=4.0, reject_threshold=16.0),
+            name="gnss_pos",
+        )
+
+        result = self.manager.process(self.filter_engine, model, self.frame)
+
+        self.assertTrue(result.available)
+        self.assertTrue(result.used)
+        self.assertFalse(result.rejected)
+        self.assertTrue(result.reject_bypassed)
+        self.assertEqual(result.management_mode, "update")
+        self.assertAlmostEqual(result.nis, 25.0, places=6)
+        self.assertAlmostEqual(result.adaptation_scale, 6.25, places=6)
+        self.assertAlmostEqual(result.applied_r_scale, 6.25, places=6)
+        self.assertAlmostEqual(float(self.filter_engine.last_R[0, 0]), 6.25, places=6)
 
     def test_manager_applies_adaptive_r_scaling(self) -> None:
         model = DummyMeasurement(
@@ -400,6 +429,46 @@ class MeasurementManagerTests(unittest.TestCase):
         self.assertFalse(result.rejected)
         self.assertGreater(result.nis, self.config.innovation_management.mag_yaw_nis_adapt_threshold)
         self.assertGreater(result.applied_r_scale, 1.0)
+
+    def test_gnss_position_measurement_uses_anisotropic_noise(self) -> None:
+        filter_engine = PhysicalDummyFilter(self.config)
+        frame = ObservationFrame(
+            time=0.0,
+            gnss_pos=np.array([3.0, -1.0, 5.0], dtype=float),
+            gnss_vel=None,
+            baro_h=None,
+            mag_yaw=None,
+        )
+
+        update = GnssPositionMeasurement().build_update(filter_engine, frame)
+
+        self.assertIsNotNone(update)
+        self.assertTrue(
+            np.allclose(
+                np.diag(update.base_R),
+                np.array([0.8**2, 0.8**2, 1.6**2], dtype=float),
+            )
+        )
+
+    def test_gnss_velocity_measurement_uses_anisotropic_noise(self) -> None:
+        filter_engine = PhysicalDummyFilter(self.config)
+        frame = ObservationFrame(
+            time=0.0,
+            gnss_pos=None,
+            gnss_vel=np.array([0.5, -0.2, 0.8], dtype=float),
+            baro_h=None,
+            mag_yaw=None,
+        )
+
+        update = GnssVelocityMeasurement().build_update(filter_engine, frame)
+
+        self.assertIsNotNone(update)
+        self.assertTrue(
+            np.allclose(
+                np.diag(update.base_R),
+                np.array([0.2**2, 0.2**2, 0.4**2], dtype=float),
+            )
+        )
 
 
 if __name__ == "__main__":

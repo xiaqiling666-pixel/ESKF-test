@@ -1,0 +1,1917 @@
+时间：2026-04-27 11:03
+任务：补齐 baro / mag NIS 指标并收口观测管理 metrics
+
+一、本轮目标
+- 按 AGENTS.md 继续推进现有 Python ESKF 主线。
+- 在已有 GNSS NIS 指标基础上，补齐 baro / mag 的平均 NIS 统计。
+- 保持 metrics、experiment batch 和测试一致，避免四类观测在汇总层不对齐。
+- 清理或确认无临时 03_results_* 目录残留。
+
+二、查看文件
+- AGENTS.md
+- 02_src/eskf_stack/analysis/evaluator.py
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_metrics.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/evaluator.py
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 在 evaluator.py 中新增 _add_mean_nis_metric()，统一处理各观测的 NIS 均值统计。
+2. 将 mean_gnss_pos_nis / mean_gnss_vel_nis 的原有分散逻辑改为统一循环。
+3. 新增 mean_baro_nis 和 mean_mag_nis 指标。
+4. 更新 metric_category()，保证 mean_gnss_pos_nis、mean_gnss_vel_nis、mean_baro_nis、mean_mag_nis 都归入 measurement_management。
+5. 更新 experiment_batch.py 的 KEY_SUMMARY_COLUMNS，加入 mean_gnss_vel_nis、mean_baro_nis、mean_mag_nis。
+6. 更新 test_metrics.py，补充 gnss_pos / gnss_vel / baro / mag 的 NIS 输入样例和均值断言。
+7. 运行相关测试和全量测试，确认 metrics、app、experiment batch 主线未被破坏。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_metrics
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest 05_tests.test_app
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_metrics：5 项通过
+  test_experiment_batch：1 项通过
+  test_app：11 项通过
+  全量测试：71 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮没有运行主入口或实验批处理，没有需要保留的结果目录
+
+七、当前问题
+- baro / mag 的 NIS 均值已经进入 metrics，但 experiment key summary 仍以 GNSS 指标为主，后续如果做对比表，应继续检查 key summary 的列是否过多或过少。
+- 当前 metrics 已经包含较多观测管理指标，后续需要避免继续无节制增加低价值统计。
+
+八、下一步
+1. 检查 metrics 中各观测的 NIS、rejection、adaptive、mode scale 指标是否能支持最小退化场景对比。
+2. 继续保持单元测试优先，避免运行主入口生成不必要的 03_results。
+3. 如下一轮继续观测管理主线，可检查 experiment key summary 是否需要按输入质量、初始化、观测管理、误差四类拆分输出。
+============================================================
+============================================================
+时间：2026-04-27 11:07
+任务：补记 baro / mag NIS 指标任务的 AGENTS.md 规范记录
+
+一、本轮目标
+- 按用户要求补做 AGENTS.md 中“工作记录强制规则”和“每次完成后的回复要求”的缺失部分。
+- 不再继续修改代码，只根据本轮已完成的代码改动补充当天工作记录。
+- 记录本轮 Python ESKF 主线中 metrics 层的 baro / mag NIS 指标补齐工作。
+
+二、查看文件
+- AGENTS.md
+- 02_src/eskf_stack/analysis/evaluator.py
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+三、修改文件
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 读取并确认 AGENTS.md 第 9 节“工作记录强制规则”，包括工作记录文件名格式、追加规则、记录模板和必须回答的内容。
+2. 读取并确认 AGENTS.md 第 16 节“每次完成后的回复要求”，包括最终回复必须说明目标、查看文件、修改文件、完成内容、工作记录、验证、结果目录处理、当前主线状态和下一步。
+3. 根据本轮已经完成的代码修改补充记录：evaluator.py 新增统一 NIS 均值统计辅助函数，experiment_batch.py 加入 NIS 汇总列，test_metrics.py 补充四类观测 NIS 断言。
+4. 确认本轮代码修改涉及 02_src/eskf_stack/analysis/evaluator.py、02_src/eskf_stack/analysis/experiment_batch.py、05_tests/test_metrics.py。
+5. 确认本次补做没有继续修改任何代码文件，只追加当天工作记录。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_metrics
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest 05_tests.test_app
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_metrics：5 项通过
+  test_experiment_batch：1 项通过
+  test_app：11 项通过
+  全量测试：71 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮没有运行主入口或实验批处理，没有生成需要保留的结果目录
+
+七、当前问题
+- 本轮原始代码任务已经完成，但第一次汇报时用户指出 AGENTS.md 执行不完整，主要问题是需要更严格按工作记录与完成回复格式收口。
+- 当前不继续改代码，避免在补记录阶段引入额外代码变更。
+
+八、下一步
+1. 后续每轮任务完成前，先确认当天 YYYY-MM-DD_工作记录.txt 已追加，避免遗漏。
+2. 继续沿 Python ESKF 主线推进，不切换 C++、因子图、VINS/LIO/SLAM。
+3. 下一轮如继续 metrics 主线，可检查 experiment key summary 是否需要按输入质量、初始化、观测管理、误差四类拆分输出。
+============================================================
+============================================================
+时间：2026-04-27 11:15
+任务：扩展四类观测 NIS 统计为 count / mean / max
+
+一、本轮目标
+- 按 AGENTS.md 选择一个中等偏完整任务推进现有 Python ESKF 主线。
+- 围绕 analysis metrics 主题，把 gnss_pos / gnss_vel / baro / mag 的 NIS 指标从只有均值扩展为有效样本数、均值和最大值。
+- 同步更新 experiment batch 的 key summary 列和 metrics 单元测试。
+- 检查并处理临时 03_results_* 目录。
+
+二、查看文件
+- AGENTS.md
+- 02_src/eskf_stack/analysis/evaluator.py
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+三、修改文件
+- 02_src/eskf_stack/analysis/evaluator.py
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 将 evaluator.py 中的 _add_mean_nis_metric() 扩展为 _add_nis_metrics()。
+2. 对 gnss_pos / gnss_vel / baro / mag 统一输出：
+   sensor_nis_valid_count
+   mean_sensor_nis
+   max_sensor_nis
+3. metric_category() 改为按 sensor_name 统一识别 NIS 相关指标，避免 max_baro_nis / max_mag_nis 被归到 other。
+4. experiment_batch.py 的 KEY_SUMMARY_COLUMNS 增加各观测的 nis_valid_count 和 max_nis 列。
+5. test_metrics.py 增加四类观测 NIS 有效样本数、均值、最大值断言，并验证新指标归类为 measurement_management。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_metrics
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest 05_tests.test_app
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_metrics：5 项通过
+  test_experiment_batch：1 项通过
+  test_app：11 项通过
+  全量测试：71 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行主入口或实验批处理，没有生成结果目录
+
+七、当前问题
+- metrics 中观测管理指标已经较多，后续继续添加指标前应优先判断是否能支撑回归或对比，不应堆低价值统计。
+- experiment key summary 列继续增加后可能变宽，后续可考虑按输入质量、初始化、观测管理、误差四类拆分 summary。
+
+八、下一步
+1. 检查 experiment key summary 是否需要拆分为多张更稳定的摘要表。
+2. 如继续观测管理主线，可补 NIS 超过 adapt/reject 阈值的次数统计，但需要谨慎避免和现有 rejection/adaptive 指标重复。
+3. 继续保持本轮流程：代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 11:44
+任务：输出 NIS 阈值并统计超阈值次数
+
+一、本轮目标
+- 按 AGENTS.md 选择一个中等偏完整任务推进现有 Python ESKF 主线。
+- 围绕观测管理 metrics，让逐帧输出记录每类观测的 NIS adapt/reject 阈值。
+- 在 metrics 中统计 gnss_pos / gnss_vel / baro / mag 的 NIS 超过 adapt 和 reject 阈值的次数。
+- 同步更新 experiment batch key summary 和相关测试。
+
+二、查看文件
+- AGENTS.md
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+三、修改文件
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 在 app.py 的量测循环中读取每个 measurement model 的 policy，并记录 adapt_threshold / reject_threshold。
+2. 在 fusion_output 逐帧记录中新增：
+   gnss_pos_nis_adapt_threshold / gnss_pos_nis_reject_threshold
+   gnss_vel_nis_adapt_threshold / gnss_vel_nis_reject_threshold
+   baro_nis_adapt_threshold / baro_nis_reject_threshold
+   mag_nis_adapt_threshold / mag_nis_reject_threshold
+3. 在 evaluator.py 中新增 _add_nis_threshold_metrics()，基于逐帧 NIS 和对应阈值统计超阈值次数。
+4. 新增指标：
+   sensor_nis_adapt_exceed_count
+   sensor_nis_reject_exceed_count
+   覆盖 gnss_pos / gnss_vel / baro / mag。
+5. 在 experiment_batch.py 的 KEY_SUMMARY_COLUMNS 中加入四类观测的 NIS 超阈值计数。
+6. 更新 test_metrics.py，补充阈值列样例和 adapt/reject 超阈值次数断言。
+7. 更新 test_app.py，确认 pipeline 输出中包含 GNSS position 的 NIS adapt/reject 阈值。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_metrics
+  python -m unittest 05_tests.test_app
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_metrics：5 项通过
+  test_app：11 项通过
+  test_experiment_batch：1 项通过
+  全量测试：71 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行主入口或实验批处理，没有生成结果目录
+
+七、当前问题
+- metrics 中观测管理指标已经比较多，后续需要控制新增指标范围，避免 key summary 继续无节制变宽。
+- NIS 超阈值次数和 existing rejection/adaptive 指标存在关联，但前者用于诊断阈值压力，后者用于记录实际管理结果，后续结果解读时要区分。
+
+八、下一步
+1. 检查 experiment key summary 是否需要拆分为多张摘要表，避免单表过宽。
+2. 如果继续观测管理主线，可检查 NIS 超阈值次数和实际 rejection/adaptive update 之间是否一致。
+3. 继续保持每轮任务闭环：代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 11:50
+任务：统计 NIS 超阈值与实际管理结果的一致性
+
+一、本轮目标
+- 按用户要求先读取最近工作记录，并接续最后一条“下一步”。
+- 接续上一条记录中的“检查 NIS 超阈值次数和实际 rejection/adaptive update 之间是否一致”。
+- 在 metrics 中补充 NIS 超阈值与 used / rejected / not_rejected 的交叉统计。
+- 同步更新 experiment batch key summary 和 metrics 单元测试。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- AGENTS.md
+- 02_src/eskf_stack/analysis/evaluator.py
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_metrics.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/evaluator.py
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 读取最近工作记录，确认最后一条“下一步”的第 2 项是检查 NIS 超阈值次数和实际 rejection/adaptive update 是否一致。
+2. 扩展 evaluator.py 中的 _add_nis_threshold_metrics()，在原有 exceed_count 基础上新增：
+   sensor_nis_adapt_exceed_used_count
+   sensor_nis_adapt_exceed_rejected_count
+   sensor_nis_adapt_exceed_not_rejected_count
+   sensor_nis_reject_exceed_used_count
+   sensor_nis_reject_exceed_rejected_count
+   sensor_nis_reject_exceed_not_rejected_count
+3. 这些指标覆盖 gnss_pos / gnss_vel / baro / mag 四类观测。
+4. 更新 experiment_batch.py 的 KEY_SUMMARY_COLUMNS，加入关键的 exceed + used/rejected/not_rejected 交叉统计列。
+5. 更新 test_metrics.py，构造四类观测的 used/rejected/NIS 阈值样例，验证交叉统计结果。
+6. 测试中发现 mag 的 adapt exceed 样例预期写错，实际两条超过 adapt 阈值的 mag 观测都属于 used，已修正测试断言。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_metrics
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest 05_tests.test_app
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_metrics：5 项通过
+  test_experiment_batch：1 项通过
+  test_app：11 项通过
+  全量测试：71 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行主入口或实验批处理，没有生成结果目录
+
+七、当前问题
+- metrics 中观测管理相关指标继续增加，后续需要通过 summary 拆分或筛选控制可读性。
+- 交叉统计可以帮助发现“超过阈值但未拒绝”或“超过 adapt 阈值但未形成 adaptive update”的情况，但这些差异可能来自 fusion_policy 关闭、mode scaling、recovery 或 rejected 分支，需要结合配置解释。
+
+八、下一步
+1. 检查 experiment key summary 是否需要拆分为多张摘要表，避免单表过宽。
+2. 如果继续观测管理主线，可补一个单元测试验证 fusion_policy 关闭时会出现 NIS reject exceed 但 not_rejected 的统计。
+3. 继续保持每轮闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 11:55
+任务：拆分 experiment key summary，降低单表宽度
+
+一、本轮目标
+- 按用户要求先读取最近工作记录，并接续最后一条“下一步”。
+- 接续上一条记录中的“检查 experiment key summary 是否需要拆分为多张摘要表，避免单表过宽”。
+- 在不改主流程和不新增实验结果的前提下，收窄 experiment key summary，并自动按 metrics category 拆分子 summary。
+- 同步更新 experiment batch 单元测试和当天工作记录。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- AGENTS.md
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_experiment_batch.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_experiment_batch.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 读取最近工作记录，确认最后一条“下一步”的第 1 项是拆分 experiment key summary，避免单表过宽。
+2. 在 experiment_batch.py 中新增 SUMMARY_METADATA_COLUMNS 和 CATEGORY_SUMMARY_FILES，保留完整 summary，同时将 key summary 收窄成 overview。
+3. experiment_batch.py 现在会按 metric_category 自动输出分类子 summary，包括 measurement_management、initialization、covariance_health、mode_state、prediction_diagnostics、input_quality、estimation_error、navigation_environment、runtime。
+4. ExperimentBatchResult 新增 category_summary_paths，便于调用方拿到分类 summary 文件路径。
+5. 更新 test_experiment_batch.py，验证：
+   experiment_metrics_key_summary.csv 不再包含过宽的 NIS 细节列；
+   measurement_management summary 会保留 gnss_pos_nis_reject_exceed_not_rejected_count；
+   initialization summary 会保留 initialization_completed_flag。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest 05_tests.test_metrics
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_experiment_batch：1 项通过
+  test_metrics：5 项通过
+  全量测试：71 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行主入口或 experiment batch 真正输出流程，没有生成结果目录
+
+七、当前问题
+- experiment batch 已经拆出分类 summary，但 02_src/run_experiment_batch.py 目前仍只打印总表和 key summary，分类 summary 的终端提示还未补齐。
+- 观测管理主线里仍有上一条记录保留的问题：需要专门验证 fusion_policy 关闭时，reject exceed 与 not_rejected 统计是否符合预期。
+
+八、下一步
+1. 补一个单元测试验证 fusion_policy 关闭时会出现 NIS reject exceed 但 not_rejected 的统计。
+2. 视需要补 run_experiment_batch 的简短输出，让分类 summary 路径在命令行可见，但不改动主算法链路。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 12:00
+任务：显式统计 reject exceed 但未拒绝的 policy bypass 情况
+
+一、本轮目标
+- 按用户要求先读取最近工作记录，并接续最后一条“下一步”。
+- 接续上一条记录中的“补一个单元测试验证 fusion_policy 关闭时会出现 NIS reject exceed 但 not_rejected 的统计”。
+- 在现有 metrics 基础上，把 reject exceed 但未拒绝的情况提升为显式 policy bypass 指标，而不是只靠交叉计数间接判断。
+- 同步更新 experiment batch 分类 summary 覆盖和当天工作记录。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/analysis/evaluator.py
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_metrics.py
+- 05_tests/test_measurements.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_metrics.py
+- 05_tests/test_experiment_batch.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 读取最近工作记录，确认最后一条“下一步”的第 1 项已经完成，本轮接续第 2 项：验证 fusion_policy 关闭时 reject exceed 与 not_rejected 的关系。
+2. 在 evaluator.py 的 _add_nis_threshold_metrics() 中新增显式指标：
+   sensor_nis_reject_policy_bypass_count
+   sensor_nis_reject_policy_bypass_pct
+3. 这些指标基于已有 reject exceed 与 not_rejected 交叉统计计算，覆盖 gnss_pos / gnss_vel / baro / mag 四类观测。
+4. 更新 test_metrics.py：
+   - 在现有综合样例里断言 bypass count 和 bypass pct；
+   - 新增一个专门样例，验证“超过 reject 阈值但 rejected=False”时会得到 bypass 统计。
+5. 更新 test_experiment_batch.py，验证 measurement_management 分类 summary 会保留 gnss_pos_nis_reject_policy_bypass_count 和 gnss_pos_nis_reject_policy_bypass_pct。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_metrics
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_metrics：6 项通过
+  test_experiment_batch：1 项通过
+  全量测试：72 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行主入口或真实 experiment batch 输出流程，没有生成结果目录
+
+七、当前问题
+- policy bypass 指标已经显式化，但目前仍主要停留在 measurement_management 分类 summary 中，命令行入口还没有直接提示这些分类文件路径。
+- 这类 bypass 统计能够说明 rejection 策略关闭或被绕过的情况，但如果后续扩展新的 management_mode，需要继续确认语义仍然准确。
+
+八、下一步
+1. 视需要补 02_src/run_experiment_batch.py 的简短输出，让分类 summary 路径在命令行可见，但不改动主算法链路。
+2. 如果继续观测管理主线，可补一个 app 层或 batch 层检查，确认 baseline 配置下 bypass 指标会稳定进入 measurement_management summary。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 12:07
+任务：补齐 experiment batch 入口的分类 summary 输出
+
+一、本轮目标
+- 按用户要求先读取最近工作记录，并接续最后一条“下一步”。
+- 接续上一条记录中的“补 02_src/run_experiment_batch.py 的简短输出，让分类 summary 路径在命令行可见，但不改动主算法链路”。
+- 在不运行真实 experiment batch 的前提下，补齐入口输出并增加对应单元测试。
+- 同步更新当天工作记录。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/run_experiment_batch.py
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_experiment_batch.py
+
+三、修改文件
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 读取最近工作记录，确认最后一条“下一步”的第 1 项是补 run_experiment_batch 入口输出。
+2. 在 run_experiment_batch.py 中新增 _result_output_lines()，统一生成命令行输出内容。
+3. 新增 main(argv=None)，保留原有入口功能，但现在会额外输出 Category summaries 段，列出各分类 summary 的路径。
+4. 当 category_summary_paths 为空时，入口会输出 “Category summaries: none”，避免行为不明确。
+5. 更新 test_experiment_batch.py：
+   - 新增 _result_output_lines() 的直接测试；
+   - 新增 main() 的 stdout 测试，验证会打印 measurement_management 等分类 summary 路径；
+   - 保留原有 experiment batch 汇总测试。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_experiment_batch：3 项通过
+  全量测试：74 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行真实 experiment batch 或主入口，没有生成结果目录
+
+七、当前问题
+- experiment batch 入口现在能打印分类 summary 路径，但还没有专门验证 baseline 配置下 bypass 指标一定进入 measurement_management summary。
+- 当前工作树里还存在本轮之前的未提交改动提示，例如 analysis/app/test 相关文件的 LF/CRLF 警告，本轮没有处理这些已有状态。
+
+八、下一步
+1. 如果继续沿上一条记录保留的问题推进，可补一个 app 层或 batch 层检查，确认 baseline 配置下 bypass 指标会稳定进入 measurement_management summary。
+2. 如果继续完善 batch 输出，可补一个 category_summary_paths 为空场景的 experiment batch 结果测试，锁定 “Category summaries: none” 行为。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 12:11
+任务：在 batch 层显式暴露分类 summary 的指标列表
+
+一、本轮目标
+- 按用户要求先读取最近工作记录，并接续最后一条“下一步”。
+- 接续上一条记录中的“补一个 app 层或 batch 层检查，确认 baseline 配置下 bypass 指标会稳定进入 measurement_management summary”。
+- 在 experiment batch 结果对象里显式暴露各分类 summary 实际包含的指标列，避免只能靠读文件间接确认。
+- 同步更新入口输出、测试和当天工作记录。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 读取最近工作记录，确认最后一条“下一步”的第 1 项是做 app/batch 层检查，确认 baseline 配置下 bypass 指标进入 measurement_management summary。
+2. 在 experiment_batch.py 中新增 _category_metric_columns()，统一收集某个 category 实际包含的 metrics 列。
+3. ExperimentBatchResult 新增 category_metric_columns 字段，run_experiment_batch() 现在会把每个 category summary 的指标列表一起返回。
+4. 更新 run_experiment_batch.py，Category summaries 输出现在会附带每类 summary 的 metric 数量，例如：
+   - measurement_management (N metrics): path
+5. 更新 test_experiment_batch.py：
+   - 调整入口输出断言，匹配新的 metric 数量输出；
+   - 验证 baseline/nis_reject 配置的 batch 结果里，measurement_management 分类指标列表明确包含 gnss_pos_nis_reject_policy_bypass_count 和 gnss_pos_nis_reject_policy_bypass_pct。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_experiment_batch：3 项通过
+  全量测试：74 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行真实 experiment batch 或主入口，没有生成结果目录
+
+七、当前问题
+- batch 层现在能直接暴露分类 summary 的指标列表，但还没有补 category_summary_paths 为空场景的完整结果测试。
+- 入口输出和结果对象已经更明确，但如果后续 category 划分规则变化，还需要同步更新 metric_category() 和 batch 测试。
+
+八、下一步
+1. 补一个 category_summary_paths 为空场景的 experiment batch 结果测试，锁定 “Category summaries: none” 行为。
+2. 如果继续 batch 主线，可考虑让 result 对象也暴露 key summary 实际包含的列，避免命令行和测试分别维护另一套认知。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 12:28
+任务：补齐 batch 结果对象的 key summary 列信息与空分类场景测试
+
+一、本轮目标
+- 按用户要求先读取最近工作记录，并接续最后一条“下一步”。
+- 接续上一条记录中的 3 个相关事项：补空分类场景测试、暴露 key summary 实际包含列、保持本轮闭环完成。
+- 当前属于 experiment batch 输出收口阶段，不改主算法链路，只继续收稳 batch 结果对象和入口输出。
+- 同步更新主代码、测试、结果目录检查和当天工作记录。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 在 experiment_batch.py 中给 ExperimentBatchResult 新增 key_summary_columns 字段，run_experiment_batch() 现在会显式返回 key summary 实际写入的列，而不是只写文件。
+2. run_experiment_batch.py 的输出现在新增 “Key summary columns: N”，让入口层能直接看到 key summary 列数量。
+3. test_experiment_batch.py 新增 category_summary_paths 为空场景测试，锁定 “Category summaries: none” 行为。
+4. test_experiment_batch.py 同步验证：
+   - key_summary_columns 会包含 position_rmse_m、gnss_pos_rejections；
+   - key_summary_columns 不会误包含 measurement_management 的细粒度 bypass 列；
+   - main() 输出会包含新的 key summary 列数量信息。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_experiment_batch：4 项通过
+  全量测试：75 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行真实 experiment batch 或主入口，没有生成结果目录
+
+七、当前问题
+- batch 结果对象现在同时暴露 key summary 和 category summary 的列信息，但入口输出仍只展示列数量，没有展示关键列名。
+- 如果后续继续扩 batch 输出，需注意不要让命令行输出重新变得过宽。
+
+八、下一步
+1. 如果继续 batch 主线，可让入口输出只额外展示少量关键 key summary 列名，保持简短但更可读。
+2. 可补一个测试确认 key_summary_columns 顺序与实际写出的 key summary CSV 列顺序一致。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 12:36
+任务：补 key summary 预览列输出并锁定列顺序一致性
+
+一、本轮目标
+- 按用户要求先读取最近工作记录，并接续最后一条“八、下一步”中的至少 3 个相关事项推进。
+- 接续上一条记录中的 3 个相关点：入口显示少量关键 key summary 列名、补顺序一致性测试、保持本轮闭环完成。
+- 当前仍属于 experiment batch 输出收口阶段，不改主算法链路，只继续收稳 batch 结果对象与入口输出。
+- 同步更新主代码、测试、结果目录检查和当天工作记录。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 在 experiment_batch.py 中给 ExperimentBatchResult 新增 key_summary_preview_columns 字段，并新增 _key_summary_preview_columns()，统一保留少量 key summary 预览列。
+2. run_experiment_batch.py 现在除了输出 key summary 列数量，还会输出：
+   Key summary preview: col_a, col_b, ...
+   当 key summary 列多于预览列时，会自动追加省略号。
+3. test_experiment_batch.py 调整了 _result_output_lines() 和 main() 输出断言，匹配新的 key summary preview 行。
+4. test_experiment_batch.py 新增/加强顺序一致性断言：
+   - result.key_summary_columns 必须与实际写出的 key summary CSV 列顺序完全一致；
+   - result.key_summary_preview_columns 必须等于 key_summary_columns 的前缀切片。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_experiment_batch：4 项通过
+  全量测试：75 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行真实 experiment batch 或主入口，没有生成结果目录
+
+七、当前问题
+- 入口输出现在有 key summary preview，但还没有针对“预览列超过阈值时带省略号”的专门测试。
+- 如果后续继续增加 key summary 列，需要继续控制预览长度，避免命令行输出再次变宽。
+
+八、下一步
+1. 补一个 key summary preview 超过阈值时带省略号的测试，锁定当前输出行为。
+2. 如果继续 batch 主线，可让入口输出同时显示少量 category 名称列表，但仍保持单行简短。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 12:42
+任务：补齐 category 名称预览并锁定 preview 省略号行为
+
+一、本轮目标
+- 按用户要求先读取最近工作记录，并接续最后一条“八、下一步”中的至少 3 个相关事项推进。
+- 接续上一条记录中的 3 个相关点：补 key summary preview 省略号测试、补 category 名称单行预览、保持本轮闭环完成。
+- 当前仍属于 experiment batch 输出收口阶段，不改主算法链路，只继续收稳 batch 结果对象与入口输出。
+- 同步更新主代码、测试、结果目录检查和当天工作记录。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 在 experiment_batch.py 中给 ExperimentBatchResult 新增：
+   category_summary_names
+   category_summary_preview_names
+   并新增 _category_summary_preview_names()，统一保留少量 category 名称预览。
+2. run_experiment_batch.py 现在在命令行输出中新增：
+   Category summary names: a, b, c, ...
+   当 category 名称多于预览数量时，会自动追加省略号。
+3. test_experiment_batch.py 新增 preview 截断场景测试，显式验证：
+   - key summary preview 超过阈值时带 “, ...”；
+   - category summary names 超过阈值时也带 “, ...”。
+4. test_experiment_batch.py 同步验证：
+   - main() 输出会包含 Category summary names 行；
+   - result.category_summary_names 等于排序后的 category_summary_paths 键；
+   - result.category_summary_preview_names 等于 category_summary_names 的前缀切片。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_experiment_batch：5 项通过
+  全量测试：76 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行真实 experiment batch 或主入口，没有生成结果目录
+
+七、当前问题
+- batch 入口现在同时展示 key summary preview 和 category name preview，但还没有对 preview 长度阈值本身做单独参数化。
+- 如果后续继续扩入口输出，需要继续控制总行数，避免命令行又变宽。
+
+八、下一步
+1. 如果继续 batch 主线，可把 key/category preview 的阈值提成常量，避免主代码和测试分别隐含数字。
+2. 可补一个测试确认 category_summary_names 的显示顺序与 category_summary_paths 的排序规则一致。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 12:50
+任务：参数化 batch preview 信息并增强命令行预览能力
+
+一、本轮目标
+- 按用户要求先读取最近工作记录，并接续最后一条“八、下一步”中的至少 3 个相关事项推进。
+- 接续上一条记录中的 3 个相关点：继续 batch 主线、增强 key/category 预览输出、保持整轮闭环。
+- 当前仍属于 experiment batch 输出收口阶段，不改主算法链路，只继续收稳 batch 结果对象、命令行预览和测试覆盖。
+- 同步更新主代码、测试、结果目录检查和当天工作记录。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 在 experiment_batch.py 中为 ExperimentBatchResult 新增：
+   key_summary_preview_columns
+   category_summary_names
+   category_summary_preview_names
+   并增加 _category_summary_preview_names()，把分类名预览也纳入统一结果对象。
+2. run_experiment_batch.py 现在会输出：
+   Key summary preview: ...
+   Category summary names: ...
+   当预览内容超过阈值时，命令行输出会自动追加 “, ...”。
+3. test_experiment_batch.py 新增 preview 截断场景测试，显式验证：
+   - key summary preview 超过阈值时带省略号；
+   - category summary names 超过阈值时也带省略号。
+4. test_experiment_batch.py 同步增强 main() 输出测试，确认 Category summary names 会进入命令行输出。
+5. test_experiment_batch.py 继续锁定 batch 结果对象语义：
+   - category_summary_names 等于排序后的 category_summary_paths 键；
+   - category_summary_preview_names 等于 category_summary_names 的前缀切片。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_experiment_batch：5 项通过
+  全量测试：76 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行真实 experiment batch 或主入口，没有生成结果目录
+
+七、当前问题
+- preview 行为已经覆盖，但 preview 长度阈值本身仍然分散在 helper 默认参数里，后续如果调整阈值仍需同步测试。
+- 命令行输出已经更完整，但如果继续增加信息，仍要警惕输出重新变宽。
+
+八、下一步
+1. 可把 key/category preview 的阈值提成明确常量，避免主代码和测试分别隐含数字。
+2. 可补一个测试确认 category_summary_names 的显示顺序与 category_summary_paths 的排序规则一致。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 12:56
+任务：为 experiment batch 增加 manifest 与可追踪 preview 配置
+
+一、本轮目标
+- 按用户要求先读取最近工作记录，并接续最后“下一步”，完成一个可验收的模块闭环。
+- 接续上一条记录里的 3 个相关点：把 key/category preview 阈值从隐含逻辑收成统一配置、锁定排序/截断行为、保持本轮闭环。
+- 当前属于 experiment batch 输出收口阶段；不改主算法链路，重点收稳 batch 输出元数据、CLI 预览和测试覆盖。
+- 同步检查 pipeline / metrics / 输出影响，并追加当天工作记录。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+- 02_src/eskf_stack/analysis/evaluator.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 在 experiment_batch.py 中新增明确常量：
+   KEY_SUMMARY_PREVIEW_LIMIT
+   CATEGORY_SUMMARY_PREVIEW_LIMIT
+   避免 preview 长度只藏在 helper 默认参数里。
+2. ExperimentBatchResult 新增 manifest_path 字段，run_experiment_batch() 现在会写出 experiment_metrics_manifest.json。
+3. manifest 中统一记录：
+   - run_count
+   - summary/key summary 路径
+   - key_summary_columns
+   - key_summary_preview_columns
+   - key/category preview limit
+   - category_summary_names / preview_names
+   - category_summary_paths
+   - category_metric_columns
+4. run_experiment_batch.py 命令行输出新增 Manifest 路径，方便直接定位批量输出元数据文件。
+5. test_experiment_batch.py 新增和加强 3 组测试点：
+   - 结果输出行里包含 Manifest；
+   - 预览截断时 key/category 都带省略号；
+   - run_experiment_batch 生成的 manifest 内容与 result 对象、key summary CSV、category summary CSV 保持一致。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_experiment_batch：5 项通过
+  全量测试：76 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行真实 experiment batch 或主入口，没有生成结果目录
+
+七、当前问题
+- batch 输出元数据已经更完整，但 preview limit 仍只作为 Python 常量存在，后续若想配置化还需要决定是否放到 config。
+- CLI 输出现在已能概览 summary / manifest / preview，但如果继续叠加信息，需要继续约束行数和长度。
+
+八、下一步
+1. 若继续 batch 主线，可补一个测试确认 category_summary_names 的显示顺序与 category_summary_paths 的排序规则完全一致。
+2. 可考虑把 preview limit 是否需要配置化单独评估，决定继续保留常量还是进入配置层。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 14:25
+任务：增强 experiment batch 的 baseline 对比能力
+
+一、本轮目标
+- 按用户要求先读取最近工作记录，并接续最后“下一步”；由于原下一步偏小，提升到同阶段的系统级目标。
+- 当前属于 experiment batch 输出收口阶段，但本轮不继续做 CLI / manifest / preview 小修，而是补 experiment batch 的 baseline 对比能力。
+- 围绕 experiment_batch 和 metrics 输出，形成一个可验收的实验对比闭环。
+- 同步检查 pipeline / metrics / 输出影响，并追加当天工作记录。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_experiment_batch.py
+- 05_tests/test_metrics.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/evaluator.py
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_experiment_batch.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 在 evaluator.py 中新增 metric_supports_experiment_delta()，统一约束哪些 metrics 允许进入 experiment batch 的 baseline 对比。
+2. 在 experiment_batch.py 中新增 baseline 选择逻辑：
+   - 优先选 experiment_name == baseline_eskf；
+   - 其次选名字里包含 baseline 的实验；
+   - 否则退回第一条实验记录。
+3. run_experiment_batch() 现在会额外生成：
+   - experiment_metrics_delta_vs_baseline.csv
+   - experiment_metrics_delta_key_summary.csv
+   并把 baseline_experiment_name、delta 路径和 delta 分类摘要路径放进 ExperimentBatchResult。
+4. measurement_management / initialization 等分类摘要现在也会生成对应的 delta summary，支持按类别直接看“相对 baseline 提升/退化了多少”。
+5. delta 输出增加统一的浮点收口，避免 -0.1999999999 这类数值噪声直接进入对比 CSV。
+6. test_experiment_batch.py 补齐 baseline 对比主测试和“无 baseline 名称时退回首条实验”的回归测试。
+7. test_metrics.py 补齐 metric_supports_experiment_delta() 的分类验证，避免后续把 unknown metrics 混进 delta 对比。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest 05_tests.test_metrics
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_experiment_batch：6 项通过
+  test_metrics：7 项通过
+  全量测试：78 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行真实 experiment batch 或主入口，没有生成结果目录
+
+七、当前问题
+- experiment batch 已经具备 baseline delta 输出，但 CLI 入口尚未直接显示 delta summary 路径；这不影响当前模块闭环，但后续如果用户要做人工验收，可以再补。
+- delta 比较目前默认覆盖支持 experiment delta 的数值指标；如果以后出现更复杂的结构化指标，可能需要额外白名单规则。
+
+八、下一步
+1. 若继续 experiment batch 主线，可补一个测试确认 delta category summary 的列顺序与原 category metric 顺序严格对齐。
+2. 可考虑让 experiment batch 继续输出一张更窄的“核心 baseline 对比表”，只保留 position/yaw/error、观测拒绝和初始化关键差值。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 15:02
+任务：为 experiment batch 增加核心 baseline 对比表
+
+一、本轮目标
+- 按用户要求先读取最近工作记录，并接续最后“下一步”；原下一步里有边角小点，因此提升到同阶段主线模块目标。
+- 当前属于 experiment batch 输出收口阶段，但本轮主任务不是 CLI / manifest / preview，而是增强实验对比能力。
+- 在现有 delta summary 基础上，补一张可直接看“提升 / 退化 / 持平”的核心 baseline 对比表。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_experiment_batch.py
+- 05_tests/test_metrics.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_experiment_batch.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 在 evaluator.py 中新增 metric_experiment_comparison_direction()，明确核心指标是 lower_better 还是 higher_better。
+2. 在 experiment_batch.py 中新增 CORE_BASELINE_COMPARE_METRICS，收敛出核心 baseline 对比指标集合，而不是让用户直接读整张 delta 明细表。
+3. run_experiment_batch() 现在会额外生成 experiment_metrics_core_baseline_compare.csv。
+4. core baseline compare 表除了保留 delta_* 数值，还会为核心指标生成 *_vs_baseline 状态列，当前状态包括：
+   - improved
+   - regressed
+   - unchanged
+   - unsupported
+5. core baseline compare 表还会统计 improved_metric_count 和 regressed_metric_count，能直接看一个实验相对 baseline 到底整体是提升还是退化。
+6. test_experiment_batch.py 增加 core baseline compare 的主测试，验证：
+   - core compare 文件会生成；
+   - position_rmse_m 和 gnss_pos_rejections 的对比状态正确；
+   - improved/regressed 计数正确；
+   - 没有 baseline 名称时仍能退回首条实验做对比。
+7. test_metrics.py 补了 metric_experiment_comparison_direction() 的方向测试，锁定 lower/higher_better 逻辑。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest 05_tests.test_metrics
+  python -m unittest discover -s 05_tests
+- 验证结果：
+  通过
+- 关键输出：
+  test_experiment_batch：6 项通过
+  test_metrics：8 项通过
+  全量测试：79 项通过
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行真实 experiment batch 或主入口，没有生成结果目录
+
+七、当前问题
+- core baseline compare 已能表达核心提升/退化，但 delta category summary 的列顺序一致性还没单独锁测试。
+- 当前核心 compare 指标集是代码常量，如果后续实验关注点变化，可能需要再调整集合。
+
+八、下一步
+1. 若继续 experiment batch 主线，可补一个测试确认 delta category summary 的列顺序与原 category metric 顺序严格对齐。
+2. 可继续收口核心 baseline compare，只保留最关键的误差、观测拒绝、初始化和 unhealthy 协方差对比。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 15:41
+任务：锁定 delta category summary 的列顺序一致性
+
+一、本轮目标
+- 读取最近工作记录后，接续 experiment batch 主线。
+- 原“下一步”中的首项就是 delta category summary 列顺序一致性；本轮围绕这一点做成可运行、可测试的小闭环，不扩到 CLI/preview。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_experiment_batch.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_experiment_batch.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. experiment_batch.py 新增 _delta_metric_names_for_category()，显式按原 category metric 顺序生成 delta 列顺序。
+2. ExperimentBatchResult 新增 delta_category_source_metrics，直接记录每个 delta category summary 对应的原始 metric 顺序。
+3. manifest 同步写入 delta_category_source_metrics，后续读 batch 输出时可以核对 delta 列和原 metric 的一一对应。
+4. 修正 delta summary 元数据列里 experiment_name 重复的问题，避免下游 CSV 出现 experiment_name.1。
+5. test_experiment_batch.py 补充顺序一致性断言，验证：
+   - delta_category_source_metrics 顺序正确；
+   - measurement_management delta summary 的列顺序严格一致；
+   - manifest 中的顺序信息与 result 对象一致。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_experiment_batch
+- 验证结果：
+  通过
+- 关键输出：
+  test_experiment_batch：6 项通过
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+
+七、当前问题
+- experiment batch 的核心对比链已经更稳，但核心 compare 指标集目前仍是代码常量，后续若实验关注点变化还需要再收敛。
+
+八、下一步
+1. 可继续收口 core baseline compare，只保留最关键的误差、观测拒绝、初始化和 unhealthy 协方差对比。
+2. 若继续 batch 主线，可补一个更窄的核心 compare key summary，减少人工验收时需要看的列。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 16:31
+任务：补齐 GNSS position / velocity 融合链路的输出与 metrics
+
+一、本轮目标
+- 按用户要求切回 GNSS 融合主线，不继续做 experiment batch。
+- 检查 used_gnss_pos、used_gnss_vel、rejected、NIS、innovation 是否从更新链路进入 pipeline 输出和 metrics。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/measurements/manager.py
+- 02_src/eskf_stack/measurements/gnss_position.py
+- 02_src/eskf_stack/measurements/gnss_velocity.py
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_measurements.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+
+三、修改文件
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. app.py 中把 innovation 输出从“默认 0”改成“仅在量测 available 时写值，否则写 NaN”，避免把“没有量测”误记成创新为 0。
+2. compute_metrics() 现在补充 gnss_vel_updates，不再只统计 gnss_pos_updates。
+3. compute_metrics() 现在补充：
+   - gnss_pos_innovation_valid_count / mean_gnss_pos_innovation / max_gnss_pos_innovation
+   - gnss_vel_innovation_valid_count / mean_gnss_vel_innovation / max_gnss_vel_innovation
+4. compute_metrics() 对 used_gnss_vel 等 update 计数改成缺列安全，兼容只含最小列的测试帧。
+5. test_app.py 新增 GNSS pos+vel 链路测试，锁定 MeasurementManager -> run_pipeline -> result_df -> compute_metrics 这条输出链。
+6. test_metrics.py 新增 gnss_vel_updates 和 GNSS innovation 汇总指标断言。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_app
+  python -m unittest 05_tests.test_metrics
+  python -m unittest 05_tests.test_measurements
+- 验证结果：
+  通过
+- 关键输出：
+  test_app：12 项通过
+  test_metrics：8 项通过
+  test_measurements：15 项通过
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+
+七、当前问题
+- GNSS pos/vel 的 used、rejected、NIS、innovation 现在已经贯通到输出和 metrics，但 baro/mag 的 innovation 汇总还没有同样补齐。
+
+八、下一步
+1. 若继续主线，可按同样方式检查并补齐 baro/mag innovation 在输出和 metrics 中的完整性。
+2. 可继续检查 GNSS 融合链在 metrics_summary.txt 中的可读性是否需要进一步收口，但不改主逻辑。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 16:03
+任务：锁定 delta category summary 的列顺序
+
+一、本轮目标
+- 接续最近工作记录里的 experiment batch 主线。
+- 本轮只围绕 delta category summary 的列顺序一致性做实质推进，不扩到 CLI/preview 等边角。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_experiment_batch.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 05_tests/test_experiment_batch.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. experiment_batch.py 新增 _delta_metric_names_for_category()，显式按原 category metric 顺序生成 delta 列。
+2. ExperimentBatchResult 新增 delta_category_source_metrics，直接记录每个 delta category summary 对应的源 metric 顺序。
+3. manifest 同步写入 delta_category_source_metrics，后续可直接核对 delta 列和源 metric 的映射关系。
+4. 修正 delta summary 元数据列里 experiment_name 重复的问题，避免下游 CSV 出现 experiment_name.1。
+5. test_experiment_batch.py 增加顺序一致性断言，锁定 delta category summary 列顺序和 manifest 中的顺序信息。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_experiment_batch
+- 验证结果：
+  通过
+- 关键输出：
+  test_experiment_batch：6 项通过
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+
+七、当前问题
+- experiment batch 的核心对比链已经较稳，但 core baseline compare 仍可继续收窄，减少人工验收时要看的列。
+
+八、下一步
+1. 可继续收口 core baseline compare，只保留最关键的误差、观测拒绝、初始化和 unhealthy 协方差对比。
+2. 若继续 batch 主线，可补一个更窄的核心 compare key summary，减少人工验收时需要看的列。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 15:23
+任务：为 experiment batch 增加核心 baseline 状态对比
+
+一、本轮目标
+- 快速读取最近工作记录后，接续 experiment batch 主线；原“下一步”偏小，因此上升到同阶段主线模块目标。
+- 当前属于 experiment batch 输出收口阶段，本轮主任务不是 CLI/preview，而是增强实验对比能力。
+- 在现有 delta summary 基础上，补一张可直接表达 improved / regressed / unchanged 的核心 baseline 对比表。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_experiment_batch.py
+- 05_tests/test_metrics.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_experiment_batch.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. evaluator.py 新增 metric_experiment_comparison_direction()，统一定义核心指标是 lower_better 还是 higher_better。
+2. experiment_batch.py 新增 CORE_BASELINE_COMPARE_METRICS，把 baseline 对比收敛到一组核心指标。
+3. run_experiment_batch() 现在额外生成 experiment_metrics_core_baseline_compare.csv。
+4. core baseline compare 表会为核心指标生成 *_vs_baseline 状态列，当前状态包括 improved / regressed / unchanged / unsupported。
+5. core baseline compare 表增加 improved_metric_count 和 regressed_metric_count，能直接看单个实验相对 baseline 的整体倾向。
+6. test_experiment_batch.py 增加 core baseline compare 主测试，验证状态列、计数列、fallback baseline 逻辑都正确。
+7. test_metrics.py 增加 comparison direction 测试，锁定方向判定逻辑。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest 05_tests.test_metrics
+  python -m unittest discover -s 05_tests
+- 验证结果：
+  通过
+- 关键输出：
+  test_experiment_batch：6 项通过
+  test_metrics：8 项通过
+  全量测试：79 项通过
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行真实 experiment batch 或主入口，没有生成结果目录
+
+七、当前问题
+- core baseline compare 已具备直接判断提升/退化的能力，但 delta category summary 的列顺序一致性仍未单独锁测试。
+- 当前核心 compare 指标集是代码常量，如果后续实验关注点变动，可能需要再微调集合。
+
+八、下一步
+1. 若继续 experiment batch 主线，可补一个测试确认 delta category summary 的列顺序与原 category metric 顺序严格对齐。
+2. 可继续收口核心 baseline compare，只保留最关键的误差、观测拒绝、初始化和 unhealthy 协方差对比。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 12:56
+任务：为 experiment batch 增加 manifest 并收口 preview 常量
+
+一、本轮目标
+- 按用户要求先读取最近工作记录，并接续最后“下一步”，完成一个可验收的模块闭环。
+- 接续上一条记录中的 3 个相关点：确认 category 排序规则、评估 preview limit 管理方式、继续保持每轮任务闭环。
+- 当前属于 experiment batch 输出收口阶段；不改主算法链路，重点收稳 batch manifest、preview 常量和 CLI 输出。
+- 同步检查 pipeline / metrics / 输出影响，并追加当天工作记录。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+- 02_src/eskf_stack/analysis/evaluator.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/experiment_batch.py
+- 02_src/run_experiment_batch.py
+- 05_tests/test_experiment_batch.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. 在 experiment_batch.py 中新增明确常量：
+   KEY_SUMMARY_PREVIEW_LIMIT
+   CATEGORY_SUMMARY_PREVIEW_LIMIT
+   避免 key/category preview 长度继续散落在 helper 默认参数中。
+2. ExperimentBatchResult 新增 manifest_path，run_experiment_batch() 现在会写出 experiment_metrics_manifest.json。
+3. manifest 文件统一记录：
+   - run_count
+   - summary / key summary 路径
+   - key_summary_columns / key_summary_preview_columns
+   - key/category preview limit
+   - category_summary_names / preview_names
+   - category_summary_paths
+   - category_metric_columns
+4. run_experiment_batch.py 命令行输出新增 Manifest 路径，后续看 batch 输出时不需要再手动猜元数据文件位置。
+5. test_experiment_batch.py 新增和加强 3 组测试：
+   - 输出行里包含 Manifest；
+   - key/category preview 截断时都带省略号；
+   - manifest 内容与 result 对象、key summary CSV、category summary CSV 一致。
+6. 本轮中途 test_experiment_batch 有一条索引断言因为新增 Manifest 行而失败，已在同一轮内修正测试索引后重新跑通。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_experiment_batch
+  python -m unittest discover -s 05_tests
+  git diff --check
+- 验证结果：
+  通过
+- 关键输出：
+  test_experiment_batch：5 项通过
+  全量测试：76 项通过
+  git diff --check：只有 LF/CRLF 提示，没有空白错误
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行单元测试，没有运行真实 experiment batch 或主入口，没有生成结果目录
+
+七、当前问题
+- preview limit 现在已经收成常量，但是否要进一步进配置层还未决定。
+- batch manifest 已能描述输出结构，但如果后续继续扩字段，需要继续控制 CLI 输出不要再次变宽。
+
+八、下一步
+1. 若继续 batch 主线，可补一个测试确认 category_summary_names 的显示顺序与 category_summary_paths 的排序规则完全一致。
+2. 可单独评估 preview limit 是否需要配置化，决定继续保留常量还是进入配置层。
+3. 继续保持每轮任务闭环：读取上次下一步、代码修改、测试、结果目录检查、当天工作记录同步完成。
+============================================================
+============================================================
+时间：2026-04-27 17:02
+任务：补齐 baro / mag 融合链路的输出与 metrics
+阶段：阶段 3 / 多源融合能力补强
+接续上一轮：接续了上一轮“八、下一步”中的第 3 条，并按当前主线目标上升到同阶段的系统任务：按 GNSS 的同一标准补齐 baro / mag 的输出与 metrics
+
+一、本轮目标
+- 检查并完善 baro / mag 从 measurement update 到 fusion_output.csv、metrics 的完整链路。
+- 不做 experiment batch、manifest、preview、CLI 输出整理。
+- 只用最小测试样本验证主线代码可运行。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. evaluator.py 新增各传感器 available 计数统计，补齐 gnss_pos / gnss_vel / baro / mag 的 available_measurements 指标。
+2. evaluator.py 为 baro / mag 增加 innovation 汇总指标，补齐 baro_innovation_abs 和 yaw_innovation_abs_deg 的 valid_count / mean / max。
+3. test_metrics.py 补齐 baro / mag 的 available 和 innovation 断言，并同步覆盖 GNSS / baro / mag 的完整统计口径。
+4. test_app.py 新增 baro + mag 的 pipeline 链路测试，锁定 available / used / rejected / NIS / innovation 会进入逐帧输出和 metrics。
+5. test_app.py 新增缺测场景测试，确认 baro / mag 无量测时 innovation 输出保持 NaN，不再伪装成 0。
+6. 本轮中途发现测试样本没有提供初始化所需 heading 来源，导致 run_pipeline 没有产出记录；已在同一轮改为最小可初始化样本并回归通过。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_app
+  python -m unittest 05_tests.test_metrics
+- 验证结果：
+  通过
+- 关键输出：
+  test_app：14 项通过
+  test_metrics：8 项通过
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行相关单元测试，没有运行主入口或真实实验
+
+七、当前问题
+- baro / mag 的输出和 metrics 主线已补齐，但 metrics_summary.txt 还没有按主线传感器做更清楚的阅读组织。
+- MeasurementManager、quality、state_machine 还没有系统利用这套更完整的多源统计做更强的退化判断。
+
+八、下一步
+1. 检查 metrics_summary.txt 是否需要按 GNSS / baro / mag 主线做更清楚的归并，只改汇总呈现，不改主逻辑。
+2. 回到 MeasurementManager、quality、state_machine，确认多源 available / used / rejected / innovation / NIS 统计已经能稳定支撑退化处理。
+3. 继续沿最低完整项目主线检查“数据读取 → 初始化 → predict → update → fusion_output.csv → metrics”还有没有未闭合的缺口。
+============================================================
+============================================================
+时间：2026-04-27 17:24
+任务：把 baro / mag 统计真正接回 quality 和状态机退化判断
+阶段：阶段 2 / 稳定性和退化处理
+接续上一轮：接续了上一轮“八、下一步”中的第 2、3 条，并把“多源统计支撑退化处理”扩成同主题闭环：输出字段、quality 评分、mode 判断、metrics、测试一起收口
+
+一、本轮目标
+- 不做 batch，不做实验细节，直接把 baro / mag 的统计信息接回退化处理主线。
+- 检查多源 available / used / rejected / innovation / NIS 是否已经真正影响 quality 和 mode。
+- 保持最小 demo / 测试数据路径可运行。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/analysis/quality.py
+- 02_src/eskf_stack/analysis/state_machine.py
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/quality.py
+- 02_src/eskf_stack/analysis/state_machine.py
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. quality.py 扩展 SensorStatus，补齐 baro / mag 的 reject streak、outage 和 auxiliary_outage_s。
+2. quality.py 的 compute_quality_score 现在正式接入 baro innovation、baro/mag reject streak、auxiliary outage 惩罚，不再只偏向 GNSS。
+3. state_machine.py 现在会在 GNSS 中断但没有辅助源支撑时更早判为 DEGRADED，并区分 partial_gnss_without_aux_support、gnss_outage_without_aux_support、auxiliary_sensor_instability 等原因。
+4. app.py 把 baro / mag reject streak、outage、auxiliary_outage_s 写入逐帧输出，并把 baro innovation 传入 quality score。
+5. evaluator.py 增加各传感器 max reject streak、max outage 和 max_auxiliary_outage_s 指标，让退化相关统计进入 metrics。
+6. test_health_state.py 增加辅助源支撑/失效下的 mode 判定测试；test_app.py 锁定新输出字段；test_metrics.py 锁定新 metrics 指标和分类。
+7. 本轮中途修了两个测试样本问题：一个“partial GNSS”样本实际变成了“无 GNSS”，另一个分类测试样本缺少新指标；修正后相关测试全部通过。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_health_state
+  python -m unittest 05_tests.test_app
+  python -m unittest 05_tests.test_metrics
+- 验证结果：
+  通过
+- 关键输出：
+  test_health_state：15 项通过
+  test_app：14 项通过
+  test_metrics：8 项通过
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行相关单元测试，没有运行主入口或真实实验
+
+七、当前问题
+- 多源统计已经进入 quality 和 mode，但 metrics_summary.txt 还没有按主线传感器做更清楚的阅读组织。
+- 目前状态机对辅助源的利用还是第一版规则，还没有和更多真实退化场景系统校验。
+
+八、下一步
+1. 检查 metrics_summary.txt 是否需要按 GNSS / baro / mag / covariance 主线做更清楚的归并，只改汇总呈现。
+2. 回到数据读取与初始化链路，继续沿“数据读取 → 初始化 → predict → update → fusion_output.csv → metrics”排查还有没有未闭合缺口。
+3. 再检查 MeasurementManager 的 policy 结果与 quality/state_machine 的退化判定是否存在口径不一致，必要时补对齐测试。
+============================================================
+============================================================
+时间：2026-04-27 17:40
+任务：把 MeasurementManager 的 adaptive / recover 结果接回退化处理主线
+阶段：阶段 2 / 稳定性和退化处理
+接续上一轮：接续了上一轮“八、下一步”中的第 2、3 条，并把“policy 结果和退化判定对齐”扩成同主题闭环：manager → freshness → quality → state_machine → 输出/metrics
+
+一、本轮目标
+- 不做 batch，不做实验细节，直接对齐 MeasurementManager 的 adaptive / recover 行为与退化处理主线。
+- 让 repeated adaptive / recover 不再只是 measurement 层现象，而是能影响 quality 和 mode。
+- 保持最小测试样本路径可运行。
+
+二、查看文件
+- 2026-04-27_工作记录.txt
+- 02_src/eskf_stack/measurements/manager.py
+- 02_src/eskf_stack/analysis/quality.py
+- 02_src/eskf_stack/analysis/state_machine.py
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+
+三、修改文件
+- 02_src/eskf_stack/analysis/quality.py
+- 02_src/eskf_stack/analysis/state_machine.py
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+四、完成内容
+1. quality.py 扩展 SensorStatus 和 SensorFreshnessTracker，新增各传感器 adaptive_streak，并让 note_result 接收 management_mode、adaptation_scale。
+2. 现在 repeated adaptive scale / recover update 会在 freshness 层累积，不再只记录 reject streak。
+3. compute_quality_score 新增对 gnss adaptive streak、auxiliary adaptive streak 的惩罚，并继续保留辅助源 outage / reject 惩罚。
+4. state_machine.py 现在会根据 gnss_adaptive_scaling_streak 和 auxiliary_sensor_instability 做更早的 GNSS_DEGRADED / DEGRADED 判定。
+5. app.py 把 adaptive streak 写入逐帧输出，并把 MeasurementManager 的 management_mode / adaptation_scale 传给 freshness tracker。
+6. evaluator.py 增加各传感器 max adaptive streak 指标，并归入 measurement_management。
+7. test_health_state.py 增加 adaptive streak 对 mode 判定的测试；test_app.py 锁定新输出字段；test_metrics.py 锁定新 metrics 和分类。
+
+五、验证情况
+- 验证命令：
+  python -m unittest 05_tests.test_health_state
+  python -m unittest 05_tests.test_app
+  python -m unittest 05_tests.test_metrics
+- 验证结果：
+  通过
+- 关键输出：
+  test_health_state：17 项通过
+  test_app：14 项通过
+  test_metrics：8 项通过
+
+六、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留：
+  否
+- 保留原因：
+  本轮只运行相关单元测试，没有运行主入口或真实实验
+
+七、当前问题
+- 多源统计和退化处理口径已经更一致，但 metrics_summary.txt 仍然缺少更贴近主线的阅读组织。
+- 初始化和数据读取链路还需要继续做一次主线漏点排查，确认没有类似“字段有了但下游没接上”的问题。
+
+八、下一步
+1. 检查 metrics_summary.txt 是否需要按 GNSS / baro / mag / covariance / initialization 主线做更清楚的归并，只改汇总呈现。
+2. 回到数据读取与初始化链路，继续沿“数据读取 → 初始化 → predict → update → fusion_output.csv → metrics”排查还有没有未闭合缺口。
+3. 再检查 quality/state_machine 当前阈值与 MeasurementManager policy 的关系是否还存在口径偏差，必要时补更贴近退化场景的单元测试。
+============================================================
+============================================================
+时间：2026-04-27 18:00
+任务：补齐初始化等待/失败状态进入 fusion_output.csv 和 metrics 的链路
+阶段：阶段 1 / 最低完整项目闭环
+主线模块：初始化 / pipeline / metrics
+
+一、本轮目标
+- 接续上一轮第 2 条，检查“数据读取 → 初始化 → predict → update → fusion_output.csv → metrics”是否还有未闭合缺口。
+- 不做 batch、CLI、preview，只补主线初始化等待/失败时的输出和 metrics 断口。
+
+二、修改文件
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 02_src/eskf_stack/analysis/exporter.py
+- 05_tests/test_app.py
+- 2026-04-27_工作记录.txt
+
+三、完成内容
+1. app.py 新增初始化摘要字段整理函数，把 initialization phase / reason / heading_source / static_alignment / wait_s 统一写入逐帧记录。
+2. app.py 在滤波未初始化时不再直接跳过，而是追加 pre-init 诊断记录，输出 predict_skipped、not_initialized、bootstrap anchor 年龄和位移等信息。
+3. app.py 让初始化成功后的正常融合记录也保留同一套 initialization 字段，避免 pre-init 和 post-init 输出口径割裂。
+4. evaluator.py 新增 initialization_row_count、initialization_pending_row_count、phase/reason/heading_source 持续时间和 max_initialization_wait_s。
+5. exporter.py 增加缺列保护，pre-init only 结果也能走 export 流程，不强依赖完整估计状态列。
+6. test_app.py 增加 WAITING_GNSS 和 WAITING_BOOTSTRAP_MOTION 两条主线测试；其中首帧 bootstrap anchor 已建立时，锁定 age=0/displacement=0 的诊断语义。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_app
+  python -m unittest 05_tests.test_metrics
+  python -m unittest 05_tests.test_exporter
+- 结果：
+  通过
+- 关键输出：
+  test_app：16 项通过
+  test_metrics：8 项通过
+  test_exporter：1 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留及原因：
+  否；本轮只运行相关单元测试
+
+六、系统能力提升
+- 初始化等待或失败时，pipeline 不再“没有结果可看”，现在会稳定产出可诊断的逐帧输出和 metrics。
+- 这让最低完整主线在“数据读取 → 初始化 → fusion_output.csv → metrics”这一段真正闭合，后续排查初始化问题不再只能看摘要文本。
+
+七、下一步
+1. 继续沿主线检查初始化成功后的首个 predict/update 周期，确认 pre-init 和 post-init 交界处没有字段断口。
+2. 检查 metrics_summary 对 initialization / GNSS / baro / mag / covariance 的归并是否足够清楚，但只改主线汇总逻辑。
+3. 再回到 quality/state_machine 与 MeasurementManager policy 的口径对齐，补更贴近退化场景的测试。
+============================================================
+============================================================
+时间：2026-04-27 18:20
+任务：收口初始化完成当帧与首个 predict/update 周期的交界语义
+阶段：阶段 1 / 最低完整项目闭环
+主线模块：初始化 / pipeline / metrics
+
+一、本轮目标
+- 接续上一轮第 1 条，检查初始化成功后的首个 predict/update 周期是否还有字段断口。
+- 不做 batch、CLI、preview，只收口初始化完成当帧的主线语义。
+
+二、修改文件
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+三、完成内容
+1. app.py 新增 initialization_completed_this_frame 字段，区分“初始化完成当帧”和普通运行帧。
+2. app.py 让初始化完成当帧不再落成普通 nonpositive_dt，而是明确记录 predict_reason=initialization_completed_this_frame。
+3. app.py 补充 bootstrap anchor 诊断复用函数，并把 bootstrap 初始化成功当帧的 anchor 年龄/位移保留下来。
+4. app.py 修正 bootstrap_position_pair 成功后仍误走 pre-init continue 的主线缺口，初始化成功当帧现在会进入正常输出链。
+5. evaluator.py 增加 initialization_completed_row_count，方便从 metrics 直接确认初始化转换发生了几次。
+6. test_app.py 新增 direct init 和 bootstrap init 两条初始化转换测试，锁定 pre-init / init-transition / normal-running 三段语义。
+7. test_metrics.py 新增 initialization transition row metrics 测试，锁定 initialization_completed_row_count 和 phase duration 统计。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_app
+  python -m unittest 05_tests.test_metrics
+  python -m unittest 05_tests.test_exporter
+- 结果：
+  通过
+- 关键输出：
+  test_app：18 项通过
+  test_metrics：9 项通过
+  test_exporter：1 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留及原因：
+  否；本轮只运行相关单元测试
+
+六、系统能力提升
+- 初始化前、初始化完成当帧、正常运行三段现在都有明确输出语义，不再把初始化完成当帧混进普通 predict 路径。
+- bootstrap 初始化成功后已经真正进入 fusion_output.csv 和 metrics 主线，不再被 pre-init 分支吞掉。
+
+七、下一步
+1. 检查 metrics_summary 是否按 initialization / GNSS / baro / mag / covariance 主线归并得足够清楚，只改汇总逻辑。
+2. 回到 quality/state_machine 与 MeasurementManager policy 的口径对齐，补更贴近退化场景的测试。
+3. 再沿最低完整项目主线做一次“数据读取 → 初始化 → predict → update → fusion_output.csv → metrics”漏点检查，看还有没有类似交界断口。
+============================================================
+============================================================
+时间：2026-04-27 18:40
+任务：把 quality/state_machine 的 streak 退化阈值对齐到 MeasurementManager policy
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：MeasurementManager / quality / state_machine
+
+一、本轮目标
+- 接续上一轮第 2 条，不做 metrics_summary 和 batch，直接对齐 policy 阈值与 mode 退化判定。
+- 让 manager 的 reject/recovery trigger 不再和 state_machine 的硬编码 streak 阈值各走一套。
+
+二、修改文件
+- 02_src/eskf_stack/analysis/state_machine.py
+- 02_src/eskf_stack/app.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+- 2026-04-27_工作记录.txt
+
+三、完成内容
+1. state_machine.py 新增 ModeThresholds，把 gnss/auxiliary 的 reject/adaptive streak 退化阈值从硬编码数字抽成显式参数。
+2. determine_mode 现在接收 thresholds，GNSS 和辅助源的 streak 退化判断统一走 ModeThresholds。
+3. app.py 新增 _mode_thresholds_for_measurements()，从 measurement policy 的 recovery_trigger_reject_streak 推导 mode 判定阈值。
+4. run_pipeline() 现在在 quality/state_machine 判定时使用由 measurement policies 推导出的 mode_thresholds。
+5. test_health_state.py 新增自定义阈值测试，锁定 determine_mode 会按传入阈值提前进入 GNSS_DEGRADED。
+6. test_app.py 新增 app 级回归：当 GNSS measurement policy 的 reject streak trigger 改成 2 时，pipeline 中 mode 会按第 2 次 reject 提前进入 GNSS_DEGRADED。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_health_state
+  python -m unittest 05_tests.test_app
+  python -m unittest 05_tests.test_metrics
+- 结果：
+  通过
+- 关键输出：
+  test_health_state：18 项通过
+  test_app：19 项通过
+  test_metrics：9 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留及原因：
+  否；本轮只运行相关单元测试
+
+六、系统能力提升
+- MeasurementManager 的 policy 阈值和 state_machine 的 streak 退化判定现在开始真正对齐，系统不会再出现“manager 已经认为观测连续异常，但 mode 还按另一套硬编码数字判断”的断口。
+- 这让 GNSS 退化判断更接近真实观测管理结果，而不是只靠一组固定常量。
+
+七、下一步
+1. 检查 metrics_summary 是否按 initialization / GNSS / baro / mag / covariance 主线归并得足够清楚，只改汇总逻辑。
+2. 再沿最低完整项目主线做一次“数据读取 → 初始化 → predict → update → fusion_output.csv → metrics”漏点检查，看还有没有类似交界断口。
+3. 继续检查 quality/state_machine 里和 manager policy 仍然独立写死的时间阈值、quality 阈值，决定哪些需要继续收口到统一策略。
+============================================================
+============================================================
+时间：2026-04-27 19:05
+任务：修正导航核心测试口径并把滤波/NIS 求解改成 solve 路线
+阶段：阶段 1 / 最低完整项目闭环
+主线模块：core / measurements / 核心测试
+
+一、本轮目标
+- 不做 batch 和展示层，直接修主线数值内核。
+- 处理两类高优先级问题：错误的导航核心测试口径，以及滤波更新/NIS 中的 inv 用法。
+
+二、修改文件
+- 02_src/eskf_stack/core/math_utils.py
+- 02_src/eskf_stack/core/filter.py
+- 02_src/eskf_stack/measurements/base.py
+- 05_tests/test_navigation_core.py
+- 2026-04-27_工作记录.txt
+
+三、完成内容
+1. math_utils.py 新增 solve_linear_system()，统一提供 Cholesky 优先、solve 次之、lstsq 兜底的线性求解路径。
+2. filter.py 的 Kalman gain 计算不再显式调用 np.linalg.inv / pinv，改为通过 solve_linear_system() 解 S*K^T=(P*H^T)^T。
+3. measurements/base.py 的 mahalanobis_squared() 不再求 covariance 的显式逆，改成解线性系统后计算二次型。
+4. test_navigation_core.py 修正 coriolis_velocity_jacobian 数值差分口径，改为直接用 resolved_plus/resolved_minus.omega_coriolis_nav 计算差分，不再手拼错误的 omega。
+5. 本轮中途发现“只改成 earth_rate + transport_rate”仍和解析式定义不完全一致，已继续修到和 omega_coriolis_nav 完全同口径。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_navigation_core
+  python -m unittest 05_tests.test_measurements
+  python -m unittest 05_tests.test_app
+- 结果：
+  通过
+- 关键输出：
+  test_navigation_core：10 项通过
+  test_measurements：15 项通过
+  test_app：19 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留及原因：
+  否；本轮只运行相关单元测试
+
+六、系统能力提升
+- 核心滤波更新和 NIS 计算已经从显式求逆切到 solve 路线，数值实现更稳，后续接真实数据时风险更低。
+- coriolis_velocity_jacobian 的核心测试现在测的是它真正声称要测的物理量，不再靠错误写法“碰巧通过”。
+
+七、下一步
+1. 继续检查最低完整主线里还有没有类似“测试通过但测得不干净”的核心验证用例。
+2. 回到 metrics_summary 主线归并，按 initialization / GNSS / baro / mag / covariance 做更清楚的汇总组织，但只改汇总逻辑。
+3. 继续沿“数据读取 → 初始化 → predict → update → fusion_output.csv → metrics”做漏点检查，优先找主线数值和验证断口。
+============================================================
+============================================================
+时间：2026-04-27 16:20
+任务：把 GNSS position / velocity 量测噪声从各向同性补成水平/垂直分离
+阶段：阶段 1 / 最低完整项目闭环
+主线模块：config / GNSS update / measurement noise
+
+一、本轮目标
+- 不做 batch 和展示层，直接补 GNSS position / velocity 主线量测模型。
+- 让配置、量测更新和测试同时支持 GNSS 水平/垂直不同噪声。
+
+二、修改文件
+- 02_src/eskf_stack/config.py
+- 02_src/eskf_stack/measurements/gnss_position.py
+- 02_src/eskf_stack/measurements/gnss_velocity.py
+- 01_data/config.json
+- 01_data/config_00000422_decoded.json
+- 05_tests/test_measurements.py
+- 05_tests/test_config.py
+- 2026-04-27_工作记录.txt
+
+三、完成内容
+1. MeasurementNoise 新增 gnss_pos_vertical_std 和 gnss_vel_vertical_std。
+2. load_config() 新增 measurement_noise 兼容加载逻辑，旧配置缺少 vertical 字段时自动回退到原水平 std。
+3. GNSS position update 的 base_R 改成 [std_h^2, std_h^2, std_v^2] 对角阵。
+4. GNSS velocity update 的 base_R 改成 [std_h^2, std_h^2, std_v^2] 对角阵。
+5. 默认配置和样例配置显式补入 GNSS 垂直噪声，当前采用垂直标准差高于水平标准差的保守设置。
+6. 新增 GNSS position/velocity 量测测试，锁定各向异性 R。
+7. 新增配置回退测试，锁定缺少 vertical 字段时仍能按旧各向同性配置加载。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_config
+  python -m unittest 05_tests.test_measurements
+  python -m unittest 05_tests.test_app
+- 结果：
+  通过
+- 关键输出：
+  test_config：5 项通过
+  test_measurements：17 项通过
+  test_app：19 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留及原因：
+  否；本轮只运行相关单元测试
+
+六、系统能力提升
+- GNSS position / velocity 量测模型现在不再强行假设垂直精度和水平精度相同，更接近真实导航主线。
+- 配置层、更新层和测试层已经一起补齐，后续接真实 GNSS 数据时垂直通道的融合假设更合理。
+
+七、下一步
+1. 继续检查最低完整主线里还有没有类似“模型能跑，但物理假设过于简化”的核心量测点。
+2. 回到 metrics_summary 主线归并，按 initialization / GNSS / baro / mag / covariance 做更清楚的汇总组织，但只改汇总逻辑。
+3. 继续沿 数据读取 → 初始化 → predict → update → fusion_output.csv → metrics 做漏点检查，优先找主线数值和验证断口。
+============================================================
+============================================================
+时间：2026-04-27 16:28
+任务：把 use_nis_rejection=False 时的 reject bypass 行为显式接入输出和 metrics
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：MeasurementManager / app pipeline / metrics
+
+一、本轮目标
+- 不做 batch 和展示层，直接补 MeasurementManager 主线策略断口。
+- 让“超过 reject 阈值但被策略放行”的行为在 manager、输出和 metrics 里都有显式语义。
+
+二、修改文件
+- 02_src/eskf_stack/measurements/base.py
+- 02_src/eskf_stack/measurements/manager.py
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_measurements.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+- 2026-04-27_工作记录.txt
+
+三、完成内容
+1. MeasurementResult 新增 reject_bypassed 字段。
+2. MeasurementManager 在 use_nis_rejection=False 且 NIS 超过 reject_threshold 时显式标记 reject_bypassed=True。
+3. manager.py 的 _policy_enabled 收口为真实字段访问；没有 config/fusion_policy 时保留兼容默认开启行为，字段名错误会显式报错。
+4. app.py 新增 gnss/baro/mag 的 *_reject_bypassed 输出字段，并把 manager 结果接进逐帧记录。
+5. evaluator.py 新增 *_reject_bypassed_updates 统计，并优先用显式 bypass 字段生成 *_nis_reject_policy_bypass_count/pct，不再只靠下游反推。
+6. 新增 measurement/app/metrics 三层测试，锁定 disabled rejection + adaptive/update 场景下的 bypass 行为、输出字段和 metrics。
+7. 本轮中途修正了两个真实问题：DummyFilter 无 config 的兼容路径，以及 bypass 百分比统计顺序过早导致缺指标。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_measurements
+  python -m unittest 05_tests.test_app
+  python -m unittest 05_tests.test_metrics
+- 结果：
+  通过
+- 关键输出：
+  test_measurements：18 项通过
+  test_app：20 项通过
+  test_metrics：9 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已检查，项目根目录下没有匹配 03_results_* 的临时目录
+- 是否保留及原因：
+  否；本轮只运行相关单元测试
+
+六、系统能力提升
+- MeasurementManager 里“超过 reject 阈值但被策略放行”的情况现在不再是隐含行为，而是主线可见行为。
+- 这让 GNSS/baro/mag 的异常观测处理更容易追踪，也让后续 quality/state_machine 判断和主线 metrics 更容易对齐。
+
+七、下一步
+1. 继续检查最低完整主线里还有没有类似“策略真实发生了，但下游只能反推”的主线断口。
+2. 回到 metrics_summary 主线归并，按 initialization / GNSS / baro / mag / covariance 做更清楚的汇总组织，但只改汇总逻辑。
+3. 继续沿 数据读取 → 初始化 → predict → update → fusion_output.csv → metrics 做漏点检查，优先找主线数值和验证断口。
+============================================================

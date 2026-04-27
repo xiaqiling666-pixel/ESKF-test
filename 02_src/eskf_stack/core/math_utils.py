@@ -21,6 +21,18 @@ def skew(vec: np.ndarray) -> np.ndarray:
     )
 
 
+def solve_linear_system(system: np.ndarray, rhs: np.ndarray) -> np.ndarray:
+    try:
+        chol = np.linalg.cholesky(system)
+        intermediate = np.linalg.solve(chol, rhs)
+        return np.linalg.solve(chol.T, intermediate)
+    except np.linalg.LinAlgError:
+        try:
+            return np.linalg.solve(system, rhs)
+        except np.linalg.LinAlgError:
+            return np.linalg.lstsq(system, rhs, rcond=None)[0]
+
+
 def wrap_angle(angle: float) -> float:
     return (angle + np.pi) % (2.0 * np.pi) - np.pi
 

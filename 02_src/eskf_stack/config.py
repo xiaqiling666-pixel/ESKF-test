@@ -27,6 +27,8 @@ class ProcessNoise:
 class MeasurementNoise:
     gnss_pos_std: float
     gnss_vel_std: float
+    gnss_pos_vertical_std: float
+    gnss_vel_vertical_std: float
     baro_std: float
     yaw_std_deg: float
 
@@ -154,6 +156,19 @@ def _load_config_metadata(payload: dict[str, Any], path: Path) -> ConfigMetadata
     return metadata
 
 
+def _load_measurement_noise(payload: dict[str, Any]) -> MeasurementNoise:
+    measurement_noise_payload = dict(payload["measurement_noise"])
+    measurement_noise_payload.setdefault(
+        "gnss_pos_vertical_std",
+        measurement_noise_payload["gnss_pos_std"],
+    )
+    measurement_noise_payload.setdefault(
+        "gnss_vel_vertical_std",
+        measurement_noise_payload["gnss_vel_std"],
+    )
+    return MeasurementNoise(**measurement_noise_payload)
+
+
 def load_config(config_path: str | Path | None = None) -> AppConfig:
     path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -166,7 +181,7 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         results_dir=payload["results_dir"],
         gravity=payload["gravity"],
         process_noise=ProcessNoise(**payload["process_noise"]),
-        measurement_noise=MeasurementNoise(**payload["measurement_noise"]),
+        measurement_noise=_load_measurement_noise(payload),
         initial_covariance=InitialCovariance(**payload["initial_covariance"]),
         initialization=InitializationConfig(
             **payload.get(

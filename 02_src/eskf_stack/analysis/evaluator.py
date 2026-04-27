@@ -21,11 +21,22 @@ def metric_category(metric_name: str) -> str:
         "final_position_error_m",
     }:
         return "estimation_error"
-    if metric_name.startswith("gnss_") or metric_name in {
-        "baro_updates",
-        "mag_updates",
-        "mean_quality_score",
-    }:
+    if metric_name == "mean_quality_score":
+        return "measurement_management"
+    for sensor_name in ("gnss_pos", "gnss_vel", "baro", "mag"):
+        if (
+            metric_name.startswith(f"{sensor_name}_")
+            or metric_name == f"mean_{sensor_name}_nis"
+            or metric_name == f"max_{sensor_name}_nis"
+            or metric_name == f"max_{sensor_name}_reject_streak"
+            or metric_name == f"max_{sensor_name}_reject_bypass_streak"
+            or metric_name == f"max_{sensor_name}_adaptive_streak"
+            or metric_name == f"max_{sensor_name}_outage_s"
+        ):
+            return "measurement_management"
+    if metric_name.startswith("auxiliary_") or metric_name == "max_auxiliary_outage_s":
+        return "measurement_management"
+    if metric_name.startswith(("gnss_", "baro_", "mag_")):
         return "measurement_management"
     if metric_name.startswith("predict_") or metric_name in {"max_dt_raw_s", "max_dt_applied_s"}:
         return "prediction_diagnostics"
@@ -43,6 +54,34 @@ def metric_category(metric_name: str) -> str:
     if metric_name in {"processed_rows", "pipeline_runtime_s"}:
         return "runtime"
     return "other"
+
+
+def metric_supports_experiment_delta(metric_name: str) -> bool:
+    return metric_category(metric_name) != "other"
+
+
+def metric_experiment_comparison_direction(metric_name: str) -> str | None:
+    lower_better_metrics = {
+        "position_rmse_m",
+        "velocity_rmse_mps",
+        "yaw_rmse_deg",
+        "final_position_error_m",
+        "gnss_pos_rejections",
+        "gnss_vel_rejections",
+        "baro_rejections",
+        "mag_rejections",
+        "covariance_unhealthy_row_count",
+        "pipeline_runtime_s",
+    }
+    higher_better_metrics = {
+        "mean_quality_score",
+        "initialization_completed_flag",
+    }
+    if metric_name in lower_better_metrics:
+        return "lower_better"
+    if metric_name in higher_better_metrics:
+        return "higher_better"
+    return None
 
 
 def _parse_bool_flag(value: object) -> float | None:
@@ -183,6 +222,153 @@ def _add_categorical_duration_metrics(
             metrics[f"{prefix}_share_{category_name}_pct"] = 100.0 * category_duration / total_duration
 
 
+def _add_mode_scale_metrics(
+    metrics: dict[str, float],
+    result_df: pd.DataFrame,
+    sensor_name: str,
+    used_column: str,
+    rejected_column: str,
+) -> None:
+    mode_scale_column = f"{sensor_name}_mode_scale"
+    if mode_scale_column not in result_df.columns:
+        return
+
+    scaled_mask = result_df[mode_scale_column] > 1.0
+    metrics[f"{sensor_name}_mode_scaled_measurements"] = float(scaled_mask.sum())
+
+    if used_column in result_df.columns:
+        metrics[f"{sensor_name}_mode_scaled_updates"] = float((scaled_mask & result_df[used_column].astype(bool)).sum())
+    else:
+        metrics[f"{sensor_name}_mode_scaled_updates"] = float(scaled_mask.sum())
+
+    if rejected_column in result_df.columns:
+        metrics[f"{sensor_name}_mode_scaled_rejections"] = float(
+            (scaled_mask & result_df[rejected_column].astype(bool)).sum()
+        )
+
+
+def _add_adaptive_r_metrics(
+    metrics: dict[str, float],
+    result_df: pd.DataFrame,
+    sensor_name: str,
+    used_column: str | None = None,
+) -> None:
+    adaptation_column = f"{sensor_name}_adaptation_scale"
+    legacy_r_scale_column = f"{sensor_name}_r_scale"
+    used_mask = pd.Series([True] * len(result_df), index=result_df.index)
+    if used_column is not None and used_column in result_df.columns:
+        used_mask = result_df[used_column].astype(bool)
+
+    if adaptation_column in result_df.columns:
+        metrics[f"{sensor_name}_adapted_updates"] = float(((result_df[adaptation_column] > 1.0) & used_mask).sum())
+    elif legacy_r_scale_column in result_df.columns:
+        metrics[f"{sensor_name}_adapted_updates"] = float(((result_df[legacy_r_scale_column] > 1.0) & used_mask).sum())
+
+
+def _add_rejection_metrics(metrics: dict[str, float], result_df: pd.DataFrame, sensor_name: str) -> None:
+    rejected_column = f"{sensor_name}_rejected"
+    if rejected_column in result_df.columns:
+        metrics[f"{sensor_name}_rejections"] = float(result_df[rejected_column].sum())
+
+
+def _add_reject_bypass_metrics(metrics: dict[str, float], result_df: pd.DataFrame, sensor_name: str) -> None:
+    bypassed_column = f"{sensor_name}_reject_bypassed"
+    if bypassed_column not in result_df.columns:
+        return
+
+    bypassed_count = float(result_df[bypassed_column].astype(bool).sum())
+    metrics[f"{sensor_name}_reject_bypassed_updates"] = bypassed_count
+
+    reject_exceed_key = f"{sensor_name}_nis_reject_exceed_count"
+    metrics[f"{sensor_name}_nis_reject_policy_bypass_count"] = bypassed_count
+    if reject_exceed_key in metrics and metrics[reject_exceed_key] > 0.0:
+        metrics[f"{sensor_name}_nis_reject_policy_bypass_pct"] = 100.0 * bypassed_count / metrics[reject_exceed_key]
+
+
+def _bool_column_sum(result_df: pd.DataFrame, column_name: str) -> float:
+    if column_name not in result_df.columns:
+        return 0.0
+    return float(result_df[column_name].sum())
+
+
+def _add_availability_metrics(metrics: dict[str, float], result_df: pd.DataFrame, sensor_name: str) -> None:
+    available_column = f"available_{sensor_name}"
+    if available_column not in result_df.columns:
+        return
+    metrics[f"{sensor_name}_available_measurements"] = _bool_column_sum(result_df, available_column)
+
+
+def _add_nis_metrics(metrics: dict[str, float], result_df: pd.DataFrame, sensor_name: str) -> None:
+    nis_column = f"{sensor_name}_nis"
+    if nis_column not in result_df.columns:
+        return
+
+    valid_nis = pd.to_numeric(result_df[nis_column], errors="coerce").dropna()
+    if not valid_nis.empty:
+        metrics[f"{sensor_name}_nis_valid_count"] = float(len(valid_nis))
+        metrics[f"mean_{sensor_name}_nis"] = float(valid_nis.mean())
+        metrics[f"max_{sensor_name}_nis"] = float(valid_nis.max())
+
+
+def _add_innovation_metrics(
+    metrics: dict[str, float],
+    result_df: pd.DataFrame,
+    sensor_name: str,
+    innovation_column: str,
+) -> None:
+    if innovation_column not in result_df.columns:
+        return
+
+    innovation_values = pd.to_numeric(result_df[innovation_column], errors="coerce").dropna()
+    if not innovation_values.empty:
+        metrics[f"{sensor_name}_innovation_valid_count"] = float(len(innovation_values))
+        metrics[f"mean_{sensor_name}_innovation"] = float(innovation_values.mean())
+        metrics[f"max_{sensor_name}_innovation"] = float(innovation_values.max())
+
+
+def _add_nis_threshold_metrics(metrics: dict[str, float], result_df: pd.DataFrame, sensor_name: str) -> None:
+    nis_column = f"{sensor_name}_nis"
+    if nis_column not in result_df.columns:
+        return
+
+    nis_values = pd.to_numeric(result_df[nis_column], errors="coerce")
+    used_column = f"used_{sensor_name}"
+    rejected_column = f"{sensor_name}_rejected"
+    used_values = result_df[used_column].astype(bool) if used_column in result_df.columns else None
+    rejected_values = result_df[rejected_column].astype(bool) if rejected_column in result_df.columns else None
+
+    for threshold_kind in ("adapt", "reject"):
+        threshold_column = f"{sensor_name}_nis_{threshold_kind}_threshold"
+        if threshold_column not in result_df.columns:
+            continue
+        thresholds = pd.to_numeric(result_df[threshold_column], errors="coerce")
+        valid_mask = nis_values.notna() & thresholds.notna()
+        if valid_mask.any():
+            exceed_mask = valid_mask & (nis_values > thresholds)
+            metrics[f"{sensor_name}_nis_{threshold_kind}_exceed_count"] = float(exceed_mask.sum())
+            if used_values is not None:
+                metrics[f"{sensor_name}_nis_{threshold_kind}_exceed_used_count"] = float(
+                    (exceed_mask & used_values).sum()
+                )
+            if rejected_values is not None:
+                metrics[f"{sensor_name}_nis_{threshold_kind}_exceed_rejected_count"] = float(
+                    (exceed_mask & rejected_values).sum()
+                )
+                metrics[f"{sensor_name}_nis_{threshold_kind}_exceed_not_rejected_count"] = float(
+                    (exceed_mask & ~rejected_values).sum()
+                )
+
+    reject_exceed_key = f"{sensor_name}_nis_reject_exceed_count"
+    reject_bypass_key = f"{sensor_name}_nis_reject_exceed_not_rejected_count"
+    explicit_bypass_key = f"{sensor_name}_reject_bypassed_updates"
+    if explicit_bypass_key not in metrics and reject_exceed_key in metrics and reject_bypass_key in metrics:
+        reject_exceed_count = metrics[reject_exceed_key]
+        reject_bypass_count = metrics[reject_bypass_key]
+        metrics[f"{sensor_name}_nis_reject_policy_bypass_count"] = reject_bypass_count
+        if reject_exceed_count > 0.0:
+            metrics[f"{sensor_name}_nis_reject_policy_bypass_pct"] = 100.0 * reject_bypass_count / reject_exceed_count
+
+
 def compute_metrics(
     result_df: pd.DataFrame,
     initialization_summary: dict[str, object] | None = None,
@@ -202,29 +388,45 @@ def compute_metrics(
         metrics["yaw_rmse_deg"] = float(np.rad2deg(np.sqrt(np.mean(yaw_error**2))))
         metrics["final_position_error_m"] = float(np.linalg.norm(position_error[-1]))
     metrics["mean_quality_score"] = float(result_df["quality_score"].mean())
-    metrics["gnss_pos_updates"] = float(result_df["used_gnss_pos"].sum())
-    metrics["baro_updates"] = float(result_df["used_baro"].sum())
-    metrics["mag_updates"] = float(result_df["used_mag"].sum())
-    if "gnss_pos_rejected" in result_df.columns:
-        metrics["gnss_pos_rejections"] = float(result_df["gnss_pos_rejected"].sum())
-    if "gnss_vel_rejected" in result_df.columns:
-        metrics["gnss_vel_rejections"] = float(result_df["gnss_vel_rejected"].sum())
-    if "gnss_pos_r_scale" in result_df.columns:
-        metrics["gnss_pos_adapted_updates"] = float((result_df["gnss_pos_r_scale"] > 1.0).sum())
-    if "gnss_vel_r_scale" in result_df.columns:
-        metrics["gnss_vel_adapted_updates"] = float((result_df["gnss_vel_r_scale"] > 1.0).sum())
-    if "gnss_pos_mode_scale" in result_df.columns:
-        metrics["gnss_pos_mode_scaled_updates"] = float((result_df["gnss_pos_mode_scale"] > 1.0).sum())
-    if "gnss_vel_mode_scale" in result_df.columns:
-        metrics["gnss_vel_mode_scaled_updates"] = float((result_df["gnss_vel_mode_scale"] > 1.0).sum())
-    if "gnss_pos_nis" in result_df.columns:
-        valid_pos_nis = result_df["gnss_pos_nis"].dropna()
-        if not valid_pos_nis.empty:
-            metrics["mean_gnss_pos_nis"] = float(valid_pos_nis.mean())
-    if "gnss_vel_nis" in result_df.columns:
-        valid_vel_nis = result_df["gnss_vel_nis"].dropna()
-        if not valid_vel_nis.empty:
-            metrics["mean_gnss_vel_nis"] = float(valid_vel_nis.mean())
+    for sensor_name in ("gnss_pos", "gnss_vel", "baro", "mag"):
+        _add_availability_metrics(metrics, result_df, sensor_name)
+    metrics["gnss_pos_updates"] = _bool_column_sum(result_df, "used_gnss_pos")
+    metrics["gnss_vel_updates"] = _bool_column_sum(result_df, "used_gnss_vel")
+    metrics["baro_updates"] = _bool_column_sum(result_df, "used_baro")
+    metrics["mag_updates"] = _bool_column_sum(result_df, "used_mag")
+    for sensor_name in ("gnss_pos", "gnss_vel", "baro", "mag"):
+        _add_rejection_metrics(metrics, result_df, sensor_name)
+    _add_adaptive_r_metrics(metrics, result_df, "gnss_pos", "used_gnss_pos")
+    _add_adaptive_r_metrics(metrics, result_df, "gnss_vel", "used_gnss_vel")
+    _add_adaptive_r_metrics(metrics, result_df, "baro", "used_baro")
+    _add_adaptive_r_metrics(metrics, result_df, "mag", "used_mag")
+    _add_mode_scale_metrics(metrics, result_df, "gnss_pos", "used_gnss_pos", "gnss_pos_rejected")
+    _add_mode_scale_metrics(metrics, result_df, "gnss_vel", "used_gnss_vel", "gnss_vel_rejected")
+    for sensor_name in ("gnss_pos", "gnss_vel", "baro", "mag"):
+        _add_nis_metrics(metrics, result_df, sensor_name)
+        _add_nis_threshold_metrics(metrics, result_df, sensor_name)
+        _add_reject_bypass_metrics(metrics, result_df, sensor_name)
+    _add_innovation_metrics(metrics, result_df, "gnss_pos", "gnss_pos_innovation_norm")
+    _add_innovation_metrics(metrics, result_df, "gnss_vel", "gnss_vel_innovation_norm")
+    _add_innovation_metrics(metrics, result_df, "baro", "baro_innovation_abs")
+    _add_innovation_metrics(metrics, result_df, "mag", "yaw_innovation_abs_deg")
+    for sensor_name in ("gnss_pos", "gnss_vel", "baro", "mag"):
+        reject_streak_column = f"{sensor_name}_reject_streak"
+        reject_bypass_streak_column = f"{sensor_name}_reject_bypass_streak"
+        adaptive_streak_column = f"{sensor_name}_adaptive_streak"
+        outage_column = f"{sensor_name}_outage_s"
+        if reject_streak_column in result_df.columns:
+            metrics[f"max_{sensor_name}_reject_streak"] = float(pd.to_numeric(result_df[reject_streak_column], errors="coerce").max())
+        if reject_bypass_streak_column in result_df.columns:
+            metrics[f"max_{sensor_name}_reject_bypass_streak"] = float(
+                pd.to_numeric(result_df[reject_bypass_streak_column], errors="coerce").max()
+            )
+        if adaptive_streak_column in result_df.columns:
+            metrics[f"max_{sensor_name}_adaptive_streak"] = float(pd.to_numeric(result_df[adaptive_streak_column], errors="coerce").max())
+        if outage_column in result_df.columns:
+            metrics[f"max_{sensor_name}_outage_s"] = float(pd.to_numeric(result_df[outage_column], errors="coerce").max())
+    if "auxiliary_outage_s" in result_df.columns:
+        metrics["max_auxiliary_outage_s"] = float(pd.to_numeric(result_df["auxiliary_outage_s"], errors="coerce").max())
     if "gravity_gradient_norm" in result_df.columns:
         metrics["mean_gravity_gradient_norm"] = float(result_df["gravity_gradient_norm"].mean())
         metrics["max_gravity_gradient_norm"] = float(result_df["gravity_gradient_norm"].max())
@@ -274,6 +476,23 @@ def compute_metrics(
         if "time" in result_df.columns and len(result_df) > 1:
             time_step = result_df["time"].diff().fillna(0.0)
             metrics["pending_duration_s"] = float(time_step[pending_series].sum())
+    if "initialization_phase" in result_df.columns:
+        _add_categorical_duration_metrics(metrics, result_df, "initialization_phase", "initialization_phase")
+        phase_series = result_df["initialization_phase"].fillna("").astype(str)
+        metrics["initialization_row_count"] = float((phase_series != "").sum())
+        metrics["initialization_pending_row_count"] = float((phase_series != "INITIALIZED").sum())
+    if "initialization_completed_this_frame" in result_df.columns:
+        metrics["initialization_completed_row_count"] = float(
+            result_df["initialization_completed_this_frame"].astype(bool).sum()
+        )
+    if "initialization_reason" in result_df.columns:
+        _add_categorical_duration_metrics(metrics, result_df, "initialization_reason", "initialization_reason")
+    if "initialization_heading_source" in result_df.columns:
+        _add_categorical_duration_metrics(metrics, result_df, "initialization_heading_source", "initialization_heading_source")
+    if "initialization_wait_s" in result_df.columns:
+        wait_values = pd.to_numeric(result_df["initialization_wait_s"], errors="coerce")
+        if wait_values.notna().any():
+            metrics["max_initialization_wait_s"] = float(wait_values.max())
     _add_initialization_metrics(metrics, initialization_summary)
     return metrics
 

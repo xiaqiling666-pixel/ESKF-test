@@ -13,7 +13,13 @@ SRC_ROOT = PROJECT_ROOT / "02_src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from eskf_stack.analysis.evaluator import compute_metrics, metric_category, save_metrics
+from eskf_stack.analysis.evaluator import (
+    compute_metrics,
+    metric_category,
+    metric_experiment_comparison_direction,
+    metric_supports_experiment_delta,
+    save_metrics,
+)
 
 
 class MetricsTests(unittest.TestCase):
@@ -30,11 +36,55 @@ class MetricsTests(unittest.TestCase):
                     "restoring_gnss_stability",
                 ],
                 "quality_score": [90.0, 90.0, 50.0, 50.0, 88.0],
-                "used_gnss_pos": [1, 1, 0, 0, 1],
-                "used_baro": [1, 1, 1, 1, 1],
-                "used_mag": [1, 1, 1, 1, 1],
+                "available_gnss_pos": [1, 1, 0, 1, 1],
+                "available_gnss_vel": [0, 1, 1, 1, 1],
+                "available_baro": [1, 1, 0, 1, 1],
+                "available_mag": [1, 0, 1, 1, 1],
+                "used_gnss_pos": [1, 1, 0, 0, 0],
+                "used_gnss_vel": [0, 0, 1, 0, 1],
+                "used_baro": [1, 0, 1, 1, 1],
+                "used_mag": [1, 1, 0, 1, 1],
+                "gnss_pos_reject_streak": [0, 0, 0, 0, 1],
+                "gnss_vel_reject_streak": [0, 0, 0, 0, 0],
+                "baro_reject_streak": [0, 1, 0, 0, 0],
+                "mag_reject_streak": [0, 0, 1, 0, 0],
+                "gnss_pos_adaptive_streak": [0, 1, 2, 0, 0],
+                "gnss_vel_adaptive_streak": [0, 0, 0, 0, 1],
+                "baro_adaptive_streak": [0, 1, 0, 2, 0],
+                "mag_adaptive_streak": [0, 0, 1, 0, 0],
+                "gnss_pos_outage_s": [0.0, 0.0, 1.0, 2.0, 3.0],
+                "gnss_vel_outage_s": [float("inf"), 0.0, 0.0, 1.0, 0.0],
+                "baro_outage_s": [0.0, 1.0, 2.0, 0.0, 0.0],
+                "mag_outage_s": [0.0, 1.0, 0.0, 0.0, 0.0],
+                "auxiliary_outage_s": [0.0, 0.0, 0.0, 0.0, 0.0],
+                "gnss_pos_innovation_norm": [1.0, 2.0, float("nan"), 4.0, 5.0],
+                "gnss_vel_innovation_norm": [float("nan"), 1.5, 2.5, 3.5, 4.5],
+                "baro_innovation_abs": [0.2, 0.4, float("nan"), 0.8, 1.0],
+                "yaw_innovation_abs_deg": [5.0, float("nan"), 9.0, 11.0, 13.0],
                 "gnss_pos_mode_scale": [1.0, 2.0, 1.0, 1.0, 1.25],
                 "gnss_vel_mode_scale": [1.0, 1.0, 1.5, 1.0, 1.15],
+                "gnss_pos_r_scale": [1.0, 2.0, 1.0, 1.0, 1.25],
+                "gnss_vel_r_scale": [1.0, 1.0, 1.5, 1.0, 1.15],
+                "gnss_pos_adaptation_scale": [1.0, 1.8, 1.0, 1.0, 1.0],
+                "gnss_vel_adaptation_scale": [1.0, 1.0, 1.0, 1.0, 1.6],
+                "gnss_pos_rejected": [False, False, False, False, True],
+                "gnss_vel_rejected": [False, False, False, False, False],
+                "baro_adaptation_scale": [1.0, 2.0, 1.0, 1.4, 1.0],
+                "mag_adaptation_scale": [1.0, 1.2, 2.0, 1.0, 1.0],
+                "baro_rejected": [False, True, False, False, False],
+                "mag_rejected": [False, False, True, False, False],
+                "gnss_pos_nis": [1.0, 2.0, float("nan"), 4.0, 5.0],
+                "gnss_vel_nis": [float("nan"), 1.5, 2.5, 3.5, 4.5],
+                "baro_nis": [0.5, 1.5, float("nan"), 2.5, 3.5],
+                "mag_nis": [2.0, float("nan"), 4.0, 6.0, 8.0],
+                "gnss_pos_nis_adapt_threshold": [3.0, 3.0, 3.0, 3.0, 3.0],
+                "gnss_pos_nis_reject_threshold": [4.5, 4.5, 4.5, 4.5, 4.5],
+                "gnss_vel_nis_adapt_threshold": [3.0, 3.0, 3.0, 3.0, 3.0],
+                "gnss_vel_nis_reject_threshold": [4.0, 4.0, 4.0, 4.0, 4.0],
+                "baro_nis_adapt_threshold": [2.0, 2.0, 2.0, 2.0, 2.0],
+                "baro_nis_reject_threshold": [3.0, 3.0, 3.0, 3.0, 3.0],
+                "mag_nis_adapt_threshold": [5.0, 5.0, 5.0, 5.0, 5.0],
+                "mag_nis_reject_threshold": [7.0, 7.0, 7.0, 7.0, 7.0],
                 "covariance_health": ["HEALTHY", "HEALTHY", "CAUTION", "UNHEALTHY", "HEALTHY"],
                 "covariance_health_reason": [
                     "nominal",
@@ -97,8 +147,127 @@ class MetricsTests(unittest.TestCase):
         self.assertAlmostEqual(metrics["max_dt_applied_s"], 0.02, places=9)
         self.assertAlmostEqual(metrics["predict_reason_duration_applied_s"], 4.0, places=9)
         self.assertAlmostEqual(metrics["predict_reason_duration_above_max_dt_skipped_s"], 1.0, places=9)
-        self.assertEqual(metrics["gnss_pos_mode_scaled_updates"], 2.0)
+        self.assertEqual(metrics["gnss_pos_mode_scaled_measurements"], 2.0)
+        self.assertEqual(metrics["gnss_pos_mode_scaled_updates"], 1.0)
+        self.assertEqual(metrics["gnss_pos_mode_scaled_rejections"], 1.0)
+        self.assertEqual(metrics["gnss_pos_available_measurements"], 4.0)
+        self.assertEqual(metrics["gnss_pos_updates"], 2.0)
+        self.assertEqual(metrics["max_gnss_pos_reject_streak"], 1.0)
+        self.assertEqual(metrics["max_gnss_pos_adaptive_streak"], 2.0)
+        self.assertAlmostEqual(metrics["max_gnss_pos_outage_s"], 3.0, places=9)
+        self.assertEqual(metrics["gnss_vel_available_measurements"], 4.0)
+        self.assertEqual(metrics["gnss_vel_updates"], 2.0)
+        self.assertEqual(metrics["max_gnss_vel_reject_streak"], 0.0)
+        self.assertEqual(metrics["max_gnss_vel_adaptive_streak"], 1.0)
+        self.assertTrue(metrics["max_gnss_vel_outage_s"] > 1e6)
+        self.assertEqual(metrics["gnss_vel_mode_scaled_measurements"], 2.0)
         self.assertEqual(metrics["gnss_vel_mode_scaled_updates"], 2.0)
+        self.assertEqual(metrics["gnss_vel_mode_scaled_rejections"], 0.0)
+        self.assertEqual(metrics["gnss_pos_adapted_updates"], 1.0)
+        self.assertEqual(metrics["gnss_vel_adapted_updates"], 1.0)
+        self.assertEqual(metrics["baro_available_measurements"], 4.0)
+        self.assertEqual(metrics["baro_updates"], 4.0)
+        self.assertEqual(metrics["max_baro_reject_streak"], 1.0)
+        self.assertEqual(metrics["max_baro_adaptive_streak"], 2.0)
+        self.assertAlmostEqual(metrics["max_baro_outage_s"], 2.0, places=9)
+        self.assertEqual(metrics["mag_available_measurements"], 4.0)
+        self.assertEqual(metrics["mag_updates"], 4.0)
+        self.assertEqual(metrics["max_mag_reject_streak"], 1.0)
+        self.assertEqual(metrics["max_mag_adaptive_streak"], 1.0)
+        self.assertAlmostEqual(metrics["max_mag_outage_s"], 1.0, places=9)
+        self.assertAlmostEqual(metrics["max_auxiliary_outage_s"], 0.0, places=9)
+        self.assertEqual(metrics["baro_rejections"], 1.0)
+        self.assertEqual(metrics["mag_rejections"], 1.0)
+        self.assertEqual(metrics["baro_adapted_updates"], 1.0)
+        self.assertEqual(metrics["mag_adapted_updates"], 1.0)
+        self.assertEqual(metrics["gnss_pos_nis_valid_count"], 4.0)
+        self.assertAlmostEqual(metrics["mean_gnss_pos_nis"], 3.0, places=9)
+        self.assertAlmostEqual(metrics["max_gnss_pos_nis"], 5.0, places=9)
+        self.assertEqual(metrics["gnss_pos_innovation_valid_count"], 4.0)
+        self.assertAlmostEqual(metrics["mean_gnss_pos_innovation"], 3.0, places=9)
+        self.assertAlmostEqual(metrics["max_gnss_pos_innovation"], 5.0, places=9)
+        self.assertEqual(metrics["gnss_pos_nis_adapt_exceed_count"], 2.0)
+        self.assertEqual(metrics["gnss_pos_nis_adapt_exceed_used_count"], 0.0)
+        self.assertEqual(metrics["gnss_pos_nis_adapt_exceed_rejected_count"], 1.0)
+        self.assertEqual(metrics["gnss_pos_nis_adapt_exceed_not_rejected_count"], 1.0)
+        self.assertEqual(metrics["gnss_pos_nis_reject_exceed_count"], 1.0)
+        self.assertEqual(metrics["gnss_pos_nis_reject_exceed_used_count"], 0.0)
+        self.assertEqual(metrics["gnss_pos_nis_reject_exceed_rejected_count"], 1.0)
+        self.assertEqual(metrics["gnss_pos_nis_reject_exceed_not_rejected_count"], 0.0)
+        self.assertEqual(metrics["gnss_pos_nis_reject_policy_bypass_count"], 0.0)
+        self.assertEqual(metrics["gnss_pos_nis_reject_policy_bypass_pct"], 0.0)
+        self.assertEqual(metrics["gnss_vel_nis_valid_count"], 4.0)
+        self.assertAlmostEqual(metrics["mean_gnss_vel_nis"], 3.0, places=9)
+        self.assertAlmostEqual(metrics["max_gnss_vel_nis"], 4.5, places=9)
+        self.assertEqual(metrics["gnss_vel_innovation_valid_count"], 4.0)
+        self.assertAlmostEqual(metrics["mean_gnss_vel_innovation"], 3.0, places=9)
+        self.assertAlmostEqual(metrics["max_gnss_vel_innovation"], 4.5, places=9)
+        self.assertEqual(metrics["gnss_vel_nis_adapt_exceed_count"], 2.0)
+        self.assertEqual(metrics["gnss_vel_nis_adapt_exceed_used_count"], 1.0)
+        self.assertEqual(metrics["gnss_vel_nis_adapt_exceed_rejected_count"], 0.0)
+        self.assertEqual(metrics["gnss_vel_nis_adapt_exceed_not_rejected_count"], 2.0)
+        self.assertEqual(metrics["gnss_vel_nis_reject_exceed_count"], 1.0)
+        self.assertEqual(metrics["gnss_vel_nis_reject_exceed_used_count"], 1.0)
+        self.assertEqual(metrics["gnss_vel_nis_reject_exceed_rejected_count"], 0.0)
+        self.assertEqual(metrics["gnss_vel_nis_reject_exceed_not_rejected_count"], 1.0)
+        self.assertEqual(metrics["gnss_vel_nis_reject_policy_bypass_count"], 1.0)
+        self.assertEqual(metrics["gnss_vel_nis_reject_policy_bypass_pct"], 100.0)
+        self.assertEqual(metrics["baro_nis_valid_count"], 4.0)
+        self.assertAlmostEqual(metrics["mean_baro_nis"], 2.0, places=9)
+        self.assertAlmostEqual(metrics["max_baro_nis"], 3.5, places=9)
+        self.assertEqual(metrics["baro_innovation_valid_count"], 4.0)
+        self.assertAlmostEqual(metrics["mean_baro_innovation"], 0.6, places=9)
+        self.assertAlmostEqual(metrics["max_baro_innovation"], 1.0, places=9)
+        self.assertEqual(metrics["baro_nis_adapt_exceed_count"], 2.0)
+        self.assertEqual(metrics["baro_nis_adapt_exceed_used_count"], 2.0)
+        self.assertEqual(metrics["baro_nis_adapt_exceed_rejected_count"], 0.0)
+        self.assertEqual(metrics["baro_nis_adapt_exceed_not_rejected_count"], 2.0)
+        self.assertEqual(metrics["baro_nis_reject_exceed_count"], 1.0)
+        self.assertEqual(metrics["baro_nis_reject_exceed_used_count"], 1.0)
+        self.assertEqual(metrics["baro_nis_reject_exceed_rejected_count"], 0.0)
+        self.assertEqual(metrics["baro_nis_reject_exceed_not_rejected_count"], 1.0)
+        self.assertEqual(metrics["baro_nis_reject_policy_bypass_count"], 1.0)
+        self.assertEqual(metrics["baro_nis_reject_policy_bypass_pct"], 100.0)
+        self.assertEqual(metrics["mag_nis_valid_count"], 4.0)
+        self.assertAlmostEqual(metrics["mean_mag_nis"], 5.0, places=9)
+        self.assertAlmostEqual(metrics["max_mag_nis"], 8.0, places=9)
+        self.assertEqual(metrics["mag_innovation_valid_count"], 4.0)
+        self.assertAlmostEqual(metrics["mean_mag_innovation"], 9.5, places=9)
+        self.assertAlmostEqual(metrics["max_mag_innovation"], 13.0, places=9)
+        self.assertEqual(metrics["mag_nis_adapt_exceed_count"], 2.0)
+        self.assertEqual(metrics["mag_nis_adapt_exceed_used_count"], 2.0)
+        self.assertEqual(metrics["mag_nis_adapt_exceed_rejected_count"], 0.0)
+        self.assertEqual(metrics["mag_nis_adapt_exceed_not_rejected_count"], 2.0)
+        self.assertEqual(metrics["mag_nis_reject_exceed_count"], 1.0)
+        self.assertEqual(metrics["mag_nis_reject_exceed_used_count"], 1.0)
+        self.assertEqual(metrics["mag_nis_reject_exceed_rejected_count"], 0.0)
+        self.assertEqual(metrics["mag_nis_reject_exceed_not_rejected_count"], 1.0)
+        self.assertEqual(metrics["mag_nis_reject_policy_bypass_count"], 1.0)
+        self.assertEqual(metrics["mag_nis_reject_policy_bypass_pct"], 100.0)
+
+    def test_reject_policy_bypass_metrics_capture_disabled_rejection_case(self) -> None:
+        result_df = pd.DataFrame(
+            {
+                "time": [0.0, 1.0],
+                "quality_score": [80.0, 82.0],
+                "used_gnss_pos": [1, 1],
+                "used_baro": [0, 0],
+                "used_mag": [0, 0],
+                "gnss_pos_reject_bypassed": [True, False],
+                "gnss_pos_rejected": [False, False],
+                "gnss_pos_nis": [5.5, 2.0],
+                "gnss_pos_nis_reject_threshold": [4.5, 4.5],
+            }
+        )
+
+        metrics = compute_metrics(result_df)
+
+        self.assertEqual(metrics["gnss_pos_reject_bypassed_updates"], 1.0)
+        self.assertEqual(metrics["gnss_pos_nis_reject_exceed_count"], 1.0)
+        self.assertEqual(metrics["gnss_pos_nis_reject_exceed_rejected_count"], 0.0)
+        self.assertEqual(metrics["gnss_pos_nis_reject_exceed_not_rejected_count"], 1.0)
+        self.assertEqual(metrics["gnss_pos_nis_reject_policy_bypass_count"], 1.0)
+        self.assertEqual(metrics["gnss_pos_nis_reject_policy_bypass_pct"], 100.0)
 
     def test_initialization_summary_metrics(self) -> None:
         result_df = pd.DataFrame(
@@ -130,6 +299,36 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["initialization_static_alignment_ready_flag"], 1.0)
         self.assertEqual(metrics["initialization_zero_yaw_fallback_used_flag"], 1.0)
         self.assertAlmostEqual(metrics["initialization_wait_s"], 1.5, places=9)
+
+    def test_initialization_transition_row_metrics(self) -> None:
+        result_df = pd.DataFrame(
+            {
+                "time": [0.0, 0.2, 0.22],
+                "quality_score": [float("nan"), 85.0, 86.0],
+                "used_gnss_pos": [0, 1, 1],
+                "used_gnss_vel": [0, 0, 0],
+                "used_baro": [0, 0, 0],
+                "used_mag": [0, 0, 0],
+                "initialization_phase": ["WAITING_BOOTSTRAP_MOTION", "INITIALIZED", "INITIALIZED"],
+                "initialization_reason": [
+                    "awaiting_bootstrap_anchor",
+                    "bootstrap_init_completed",
+                    "bootstrap_init_completed",
+                ],
+                "initialization_heading_source": ["none", "position_pair_course", "position_pair_course"],
+                "initialization_wait_s": [0.0, 0.2, 0.2],
+                "initialization_completed_this_frame": [False, True, False],
+            }
+        )
+
+        metrics = compute_metrics(result_df)
+
+        self.assertEqual(metrics["initialization_row_count"], 3.0)
+        self.assertEqual(metrics["initialization_pending_row_count"], 1.0)
+        self.assertEqual(metrics["initialization_completed_row_count"], 1.0)
+        self.assertAlmostEqual(metrics["initialization_phase_duration_WAITING_BOOTSTRAP_MOTION_s"], 0.2, places=9)
+        self.assertAlmostEqual(metrics["initialization_phase_duration_INITIALIZED_s"], 0.13, places=9)
+        self.assertAlmostEqual(metrics["max_initialization_wait_s"], 0.2, places=9)
 
     def test_save_metrics_writes_human_readable_initialization_summary(self) -> None:
         metrics = {
@@ -170,6 +369,22 @@ class MetricsTests(unittest.TestCase):
             "initialization_completed_flag": 1.0,
             "position_rmse_m": 0.5,
             "gnss_pos_rejections": 1.0,
+            "baro_adapted_updates": 1.0,
+            "baro_nis_valid_count": 4.0,
+            "mean_baro_nis": 2.0,
+            "max_baro_nis": 3.5,
+            "baro_nis_adapt_exceed_count": 2.0,
+            "baro_nis_adapt_exceed_used_count": 2.0,
+            "baro_nis_adapt_exceed_rejected_count": 0.0,
+            "mag_rejections": 1.0,
+            "mag_nis_valid_count": 4.0,
+            "mean_mag_nis": 5.0,
+            "max_mag_nis": 8.0,
+            "mag_nis_reject_exceed_count": 1.0,
+            "mag_nis_reject_exceed_rejected_count": 0.0,
+            "mag_nis_reject_exceed_not_rejected_count": 1.0,
+            "max_auxiliary_outage_s": 0.0,
+            "max_baro_adaptive_streak": 2.0,
             "predict_warning_count": 0.0,
             "covariance_unhealthy_row_count": 0.0,
             "mode_transition_count": 2.0,
@@ -187,6 +402,22 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(categories["initialization_completed_flag"], "initialization")
         self.assertEqual(categories["position_rmse_m"], "estimation_error")
         self.assertEqual(categories["gnss_pos_rejections"], "measurement_management")
+        self.assertEqual(categories["baro_adapted_updates"], "measurement_management")
+        self.assertEqual(categories["baro_nis_valid_count"], "measurement_management")
+        self.assertEqual(categories["mean_baro_nis"], "measurement_management")
+        self.assertEqual(categories["max_baro_nis"], "measurement_management")
+        self.assertEqual(categories["baro_nis_adapt_exceed_count"], "measurement_management")
+        self.assertEqual(categories["baro_nis_adapt_exceed_used_count"], "measurement_management")
+        self.assertEqual(categories["baro_nis_adapt_exceed_rejected_count"], "measurement_management")
+        self.assertEqual(categories["mag_rejections"], "measurement_management")
+        self.assertEqual(categories["mag_nis_valid_count"], "measurement_management")
+        self.assertEqual(categories["mean_mag_nis"], "measurement_management")
+        self.assertEqual(categories["max_mag_nis"], "measurement_management")
+        self.assertEqual(categories["mag_nis_reject_exceed_count"], "measurement_management")
+        self.assertEqual(categories["mag_nis_reject_exceed_rejected_count"], "measurement_management")
+        self.assertEqual(categories["mag_nis_reject_exceed_not_rejected_count"], "measurement_management")
+        self.assertEqual(categories["max_auxiliary_outage_s"], "measurement_management")
+        self.assertEqual(categories["max_baro_adaptive_streak"], "measurement_management")
         self.assertEqual(categories["predict_warning_count"], "prediction_diagnostics")
         self.assertEqual(categories["covariance_unhealthy_row_count"], "covariance_health")
         self.assertEqual(categories["mode_transition_count"], "mode_state")
@@ -194,6 +425,18 @@ class MetricsTests(unittest.TestCase):
 
     def test_metric_category_defaults_unknown_metrics_to_other(self) -> None:
         self.assertEqual(metric_category("custom_future_metric"), "other")
+
+    def test_metric_supports_experiment_delta_matches_supported_categories(self) -> None:
+        self.assertTrue(metric_supports_experiment_delta("position_rmse_m"))
+        self.assertTrue(metric_supports_experiment_delta("gnss_pos_rejections"))
+        self.assertTrue(metric_supports_experiment_delta("initialization_completed_flag"))
+        self.assertFalse(metric_supports_experiment_delta("custom_future_metric"))
+
+    def test_metric_experiment_comparison_direction_reports_expected_preferences(self) -> None:
+        self.assertEqual(metric_experiment_comparison_direction("position_rmse_m"), "lower_better")
+        self.assertEqual(metric_experiment_comparison_direction("mean_quality_score"), "higher_better")
+        self.assertEqual(metric_experiment_comparison_direction("initialization_completed_flag"), "higher_better")
+        self.assertIsNone(metric_experiment_comparison_direction("gnss_pos_updates"))
 
 
 if __name__ == "__main__":

@@ -17,6 +17,10 @@ from .plotter import (
 )
 
 
+def _has_columns(result_df: pd.DataFrame, required_columns: tuple[str, ...]) -> bool:
+    return all(column in result_df.columns for column in required_columns)
+
+
 def save_dataset_source_summary(
     metrics_dir: Path,
     config,
@@ -79,12 +83,16 @@ def export_pipeline_results(
         initialization_summary,
     )
 
-    save_trajectory_plot(result_df, figure_dir / "trajectory.png")
-    save_error_plot(result_df, figure_dir / "error_summary.png")
-    save_quality_plot(result_df, figure_dir / "quality_mode.png")
-    save_navigation_plot(result_df, figure_dir / "navigation_diagnostics.png")
-    save_covariance_plot(result_df, figure_dir / "covariance_diagnostics.png")
-    save_state_machine_summary_plot(result_df, figure_dir / "state_machine_summary.png")
+    if _has_columns(result_df, ("time", "est_x", "est_y", "est_z")):
+        save_trajectory_plot(result_df, figure_dir / "trajectory.png")
+    if _has_columns(result_df, ("time", "est_x", "est_y", "est_z", "est_vx", "est_vy", "est_vz", "est_yaw")):
+        save_error_plot(result_df, figure_dir / "error_summary.png")
+    if _has_columns(result_df, ("time", "quality_score", "mode")):
+        save_quality_plot(result_df, figure_dir / "quality_mode.png")
+    if _has_columns(result_df, ("time",)):
+        save_navigation_plot(result_df, figure_dir / "navigation_diagnostics.png")
+        save_covariance_plot(result_df, figure_dir / "covariance_diagnostics.png")
+        save_state_machine_summary_plot(result_df, figure_dir / "state_machine_summary.png")
 
     metrics = compute_metrics(result_df, initialization_summary=initialization_summary)
     if extra_metrics:

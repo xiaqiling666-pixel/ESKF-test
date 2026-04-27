@@ -27,10 +27,18 @@ class GnssVelocityMeasurement(MeasurementModel):
         residual = frame.gnss_vel - filter_engine.state.velocity
         H = np.zeros((AXIS_DIM, ERROR_STATE_DIM))
         H[:, ERROR_STATE.velocity] = np.eye(AXIS_DIM)
-        std = filter_engine.config.measurement_noise.gnss_vel_std
+        measurement_noise = filter_engine.config.measurement_noise
+        horizontal_std = measurement_noise.gnss_vel_std
+        vertical_std = measurement_noise.gnss_vel_vertical_std
         return MeasurementUpdate(
             residual=residual,
             H=H,
-            base_R=np.eye(AXIS_DIM) * (std**2),
+            base_R=np.diag(
+                [
+                    horizontal_std**2,
+                    horizontal_std**2,
+                    vertical_std**2,
+                ]
+            ),
             innovation_value=float(np.linalg.norm(residual)),
         )

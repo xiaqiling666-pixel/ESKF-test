@@ -11,9 +11,22 @@ class SensorStatus:
     recent_mag: bool
     gnss_pos_reject_streak: int
     gnss_vel_reject_streak: int
+    baro_reject_streak: int
+    mag_reject_streak: int
+    gnss_pos_reject_bypass_streak: int
+    gnss_vel_reject_bypass_streak: int
+    baro_reject_bypass_streak: int
+    mag_reject_bypass_streak: int
+    gnss_pos_adaptive_streak: int
+    gnss_vel_adaptive_streak: int
+    baro_adaptive_streak: int
+    mag_adaptive_streak: int
     gnss_pos_outage_s: float
     gnss_vel_outage_s: float
     gnss_outage_s: float
+    baro_outage_s: float
+    mag_outage_s: float
+    auxiliary_outage_s: float
 
 
 @dataclass(frozen=True)
@@ -43,17 +56,51 @@ class SensorFreshnessTracker:
             "baro": 0,
             "mag": 0,
         }
+        self.reject_bypass_streak: dict[str, int] = {
+            "gnss_pos": 0,
+            "gnss_vel": 0,
+            "baro": 0,
+            "mag": 0,
+        }
+        self.adaptive_streak: dict[str, int] = {
+            "gnss_pos": 0,
+            "gnss_vel": 0,
+            "baro": 0,
+            "mag": 0,
+        }
 
-    def note_result(self, sensor_name: str, current_time: float, available: bool, used: bool, rejected: bool) -> None:
+    def note_result(
+        self,
+        sensor_name: str,
+        current_time: float,
+        available: bool,
+        used: bool,
+        rejected: bool,
+        reject_bypassed: bool = False,
+        management_mode: str = "skip",
+        adaptation_scale: float = 1.0,
+    ) -> None:
         if used:
             self.last_update_time[sensor_name] = current_time
             self.reject_streak[sensor_name] = 0
+            if reject_bypassed:
+                self.reject_bypass_streak[sensor_name] += 1
+            else:
+                self.reject_bypass_streak[sensor_name] = 0
+            if adaptation_scale > 1.0 or management_mode == "recover":
+                self.adaptive_streak[sensor_name] += 1
+            else:
+                self.adaptive_streak[sensor_name] = 0
             return
         if rejected and available:
             self.reject_streak[sensor_name] += 1
+            self.reject_bypass_streak[sensor_name] = 0
+            self.adaptive_streak[sensor_name] = 0
             return
         if available:
             self.reject_streak[sensor_name] = 0
+            self.reject_bypass_streak[sensor_name] = 0
+            self.adaptive_streak[sensor_name] = 0
 
     def is_recent(self, sensor_name: str, current_time: float, timeout_s: float) -> bool:
         last_time = self.last_update_time[sensor_name]
@@ -78,6 +125,17 @@ class SensorFreshnessTracker:
             return float("inf")
         return max(0.0, current_time - last_any)
 
+    def auxiliary_outage_duration(self, current_time: float) -> float:
+        last_baro = self.last_update_time["baro"]
+        last_mag = self.last_update_time["mag"]
+        last_any = max(
+            (time_value for time_value in (last_baro, last_mag) if time_value is not None),
+            default=None,
+        )
+        if last_any is None:
+            return float("inf")
+        return max(0.0, current_time - last_any)
+
     def snapshot(self, current_time: float) -> SensorStatus:
         return SensorStatus(
             recent_gnss_pos=self.is_recent("gnss_pos", current_time, timeout_s=0.6),
@@ -86,9 +144,22 @@ class SensorFreshnessTracker:
             recent_mag=self.is_recent("mag", current_time, timeout_s=0.6),
             gnss_pos_reject_streak=self.reject_streak["gnss_pos"],
             gnss_vel_reject_streak=self.reject_streak["gnss_vel"],
+            baro_reject_streak=self.reject_streak["baro"],
+            mag_reject_streak=self.reject_streak["mag"],
+            gnss_pos_reject_bypass_streak=self.reject_bypass_streak["gnss_pos"],
+            gnss_vel_reject_bypass_streak=self.reject_bypass_streak["gnss_vel"],
+            baro_reject_bypass_streak=self.reject_bypass_streak["baro"],
+            mag_reject_bypass_streak=self.reject_bypass_streak["mag"],
+            gnss_pos_adaptive_streak=self.adaptive_streak["gnss_pos"],
+            gnss_vel_adaptive_streak=self.adaptive_streak["gnss_vel"],
+            baro_adaptive_streak=self.adaptive_streak["baro"],
+            mag_adaptive_streak=self.adaptive_streak["mag"],
             gnss_pos_outage_s=self.outage_duration("gnss_pos", current_time),
             gnss_vel_outage_s=self.outage_duration("gnss_vel", current_time),
             gnss_outage_s=self.gnss_outage_duration(current_time),
+            baro_outage_s=self.outage_duration("baro", current_time),
+            mag_outage_s=self.outage_duration("mag", current_time),
+            auxiliary_outage_s=self.auxiliary_outage_duration(current_time),
         )
 
 
@@ -200,12 +271,17 @@ def compute_quality_score(
     sensor_status: SensorStatus,
     pos_innovation_norm: float,
     vel_innovation_norm: float,
+    baro_innovation_abs: float,
     yaw_innovation_abs_deg: float,
     pos_sigma_norm_m: float,
     vel_sigma_norm_mps: float,
     att_sigma_norm_deg: float,
 ) -> float:
     score = 35.0
+    gnss_bypass_streak = max(sensor_status.gnss_pos_reject_bypass_streak, sensor_status.gnss_vel_reject_bypass_streak)
+    auxiliary_bypass_streak = max(sensor_status.baro_reject_bypass_streak, sensor_status.mag_reject_bypass_streak)
+    gnss_adaptive_streak = max(sensor_status.gnss_pos_adaptive_streak, sensor_status.gnss_vel_adaptive_streak)
+    auxiliary_adaptive_streak = max(sensor_status.baro_adaptive_streak, sensor_status.mag_adaptive_streak)
     if sensor_status.recent_gnss_pos:
         score += 25.0
     if sensor_status.recent_gnss_vel:
@@ -217,8 +293,16 @@ def compute_quality_score(
 
     score -= min(pos_innovation_norm * 3.0, 18.0)
     score -= min(vel_innovation_norm * 6.0, 12.0)
+    score -= min(baro_innovation_abs * 4.0, 8.0)
     score -= min(yaw_innovation_abs_deg * 0.8, 10.0)
     score -= min(max(pos_sigma_norm_m - 1.5, 0.0) * 6.0, 10.0)
     score -= min(max(vel_sigma_norm_mps - 0.7, 0.0) * 12.0, 10.0)
     score -= min(max(att_sigma_norm_deg - 8.0, 0.0) * 1.5, 10.0)
+    score -= min(gnss_bypass_streak * 4.0, 12.0)
+    score -= min(gnss_adaptive_streak * 3.0, 9.0)
+    score -= min((sensor_status.baro_reject_streak + sensor_status.mag_reject_streak) * 2.0, 8.0)
+    score -= min(auxiliary_bypass_streak * 2.5, 8.0)
+    score -= min(auxiliary_adaptive_streak * 2.0, 6.0)
+    if not sensor_status.recent_baro and not sensor_status.recent_mag:
+        score -= min(max(sensor_status.auxiliary_outage_s - 0.5, 0.0) * 6.0, 10.0)
     return max(0.0, min(100.0, score))

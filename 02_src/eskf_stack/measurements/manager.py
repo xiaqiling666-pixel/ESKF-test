@@ -8,9 +8,12 @@ from .base import MeasurementModel, MeasurementResult, MeasurementUpdate, innova
 
 
 def _policy_enabled(filter_engine: OfflineESKF, field_name: str) -> bool:
-    fusion_policy = getattr(getattr(filter_engine, "config", None), "fusion_policy", None)
-    if fusion_policy is None:
+    config = getattr(filter_engine, "config", None)
+    if config is None or not hasattr(config, "fusion_policy"):
         return True
+    fusion_policy = config.fusion_policy
+    if not hasattr(fusion_policy, field_name):
+        raise AttributeError(f"FusionPolicy 缺少字段: {field_name}")
     return bool(getattr(fusion_policy, field_name))
 
 
@@ -71,8 +74,14 @@ class MeasurementManager:
         mode_scale = _mode_measurement_scale(filter_engine, model.name, current_mode)
         effective_base_R = update.base_R * mode_scale
         nis = mahalanobis_squared(update.residual, innovation_covariance(filter_engine, update.H, effective_base_R))
+        use_nis_rejection = _policy_enabled(filter_engine, "use_nis_rejection")
+        reject_bypassed = bool(
+            (not use_nis_rejection)
+            and policy.reject_threshold is not None
+            and nis > policy.reject_threshold
+        )
 
-        if _policy_enabled(filter_engine, "use_nis_rejection") and policy.reject_threshold is not None and nis > policy.reject_threshold:
+        if use_nis_rejection and policy.reject_threshold is not None and nis > policy.reject_threshold:
             self.reject_streaks[model.name] = self.reject_streaks.get(model.name, 0) + 1
             self.recovery_remaining[model.name] = 0
             return MeasurementResult(
@@ -82,6 +91,7 @@ class MeasurementManager:
                 innovation_value=update.innovation_value,
                 nis=nis,
                 rejected=True,
+                reject_bypassed=False,
                 mode_scale=mode_scale,
                 management_mode="reject",
             )
@@ -129,6 +139,7 @@ class MeasurementManager:
             used=True,
             innovation_value=update.innovation_value,
             nis=nis,
+            reject_bypassed=reject_bypassed,
             adaptation_scale=adaptation_scale,
             recovery_scale=recovery_scale,
             mode_scale=mode_scale,

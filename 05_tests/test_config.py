@@ -29,6 +29,8 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(config.fusion_policy.use_recovery_scale)
         self.assertGreater(config.innovation_management.baro_nis_reject_threshold, 0.0)
         self.assertGreater(config.innovation_management.mag_yaw_nis_reject_threshold, 0.0)
+        self.assertGreater(config.measurement_noise.gnss_pos_vertical_std, config.measurement_noise.gnss_pos_std)
+        self.assertGreater(config.measurement_noise.gnss_vel_vertical_std, config.measurement_noise.gnss_vel_std)
 
     def test_sample_config_uses_non_default_profile(self) -> None:
         config = load_config(PROJECT_ROOT / "01_data" / "config_00000422_decoded.json")
@@ -40,6 +42,8 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(config.time_step_management.skip_large_dt)
         self.assertGreater(config.innovation_management.baro_nis_adapt_threshold, 0.0)
         self.assertGreater(config.innovation_management.mag_yaw_nis_adapt_threshold, 0.0)
+        self.assertGreater(config.measurement_noise.gnss_pos_vertical_std, config.measurement_noise.gnss_pos_std)
+        self.assertGreater(config.measurement_noise.gnss_vel_vertical_std, config.measurement_noise.gnss_vel_std)
 
     def test_experiment_configs_define_ablation_fusion_policies(self) -> None:
         expected_policies = {
@@ -76,6 +80,22 @@ class ConfigTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "不能使用 profile=default_general"):
                 load_config(config_path)
+
+    def test_measurement_noise_vertical_std_defaults_to_isotropic_values(self) -> None:
+        payload = json.loads((PROJECT_ROOT / "01_data" / "config.json").read_text(encoding="utf-8"))
+        payload["config_metadata"]["profile"] = "sample_validation"
+        payload["config_metadata"]["name"] = "vertical std fallback test"
+        payload["measurement_noise"].pop("gnss_pos_vertical_std")
+        payload["measurement_noise"].pop("gnss_vel_vertical_std")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "fallback_vertical_std.json"
+            config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            config = load_config(config_path)
+
+        self.assertEqual(config.measurement_noise.gnss_pos_vertical_std, config.measurement_noise.gnss_pos_std)
+        self.assertEqual(config.measurement_noise.gnss_vel_vertical_std, config.measurement_noise.gnss_vel_std)
 
 
 if __name__ == "__main__":

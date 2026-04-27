@@ -50,24 +50,22 @@ class NavigationCoreTests(unittest.TestCase):
             delta[axis] = step
             velocity_plus = velocity_nav + delta
             velocity_minus = velocity_nav - delta
-            omega_plus = environment.earth_rate_nav + environment.earth_rate_nav
-            omega_plus += resolve_local_navigation_environment(
+            resolved_plus = resolve_local_navigation_environment(
                 base_environment,
                 position_nav,
                 velocity_plus,
                 use_wgs84_gravity=self.config.navigation_environment.use_wgs84_gravity,
                 use_earth_rotation=self.config.navigation_environment.use_earth_rotation,
-            ).transport_rate_nav
-            omega_minus = environment.earth_rate_nav + environment.earth_rate_nav
-            omega_minus += resolve_local_navigation_environment(
+            )
+            resolved_minus = resolve_local_navigation_environment(
                 base_environment,
                 position_nav,
                 velocity_minus,
                 use_wgs84_gravity=self.config.navigation_environment.use_wgs84_gravity,
                 use_earth_rotation=self.config.navigation_environment.use_earth_rotation,
-            ).transport_rate_nav
-            coriolis_plus = -np.cross(omega_plus, velocity_plus)
-            coriolis_minus = -np.cross(omega_minus, velocity_minus)
+            )
+            coriolis_plus = -np.cross(resolved_plus.omega_coriolis_nav, velocity_plus)
+            coriolis_minus = -np.cross(resolved_minus.omega_coriolis_nav, velocity_minus)
             numeric[:, axis] = (coriolis_plus - coriolis_minus) / (2.0 * step)
 
         self.assertTrue(np.allclose(analytic, numeric, rtol=1e-6, atol=1e-10))

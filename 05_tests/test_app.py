@@ -22,7 +22,9 @@ from eskf_stack.core import ImuInitializationSample
 from eskf_stack.app import _assess_initialization_status, _bootstrap_initialize_from_position_pair, _initialize_filter, run_pipeline
 from eskf_stack.config import load_config
 from eskf_stack.core import OfflineESKF
-from eskf_stack.measurements.base import MeasurementResult
+from eskf_stack.measurements.base import MeasurementPolicy, MeasurementResult
+from eskf_stack.measurements.gnss_position import GnssPositionMeasurement
+from eskf_stack.measurements.gnss_velocity import GnssVelocityMeasurement
 
 
 def _minimal_metrics_frame() -> pd.DataFrame:
@@ -116,6 +118,310 @@ class AppInitializationTests(unittest.TestCase):
         self.assertEqual(status.phase, "WAITING_GNSS")
         self.assertEqual(status.reason, "no_gnss_position")
         self.assertIsNone(static_check)
+
+    def test_pipeline_records_waiting_gnss_rows_before_initialization(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0, 1.0],
+                "ax": [0.0, 0.0],
+                "ay": [0.0, 0.0],
+                "az": [-9.81, -9.81],
+                "gx": [0.0, 0.0],
+                "gy": [0.0, 0.0],
+                "gz": [0.0, 0.0],
+                "gnss_x": [np.nan, np.nan],
+                "gnss_y": [np.nan, np.nan],
+                "gnss_z": [np.nan, np.nan],
+                "gnss_vx": [np.nan, np.nan],
+                "gnss_vy": [np.nan, np.nan],
+                "gnss_vz": [np.nan, np.nan],
+                "baro_h": [np.nan, np.nan],
+                "mag_yaw": [np.nan, np.nan],
+                "truth_x": [np.nan, np.nan],
+                "truth_y": [np.nan, np.nan],
+                "truth_z": [np.nan, np.nan],
+                "truth_vx": [np.nan, np.nan],
+                "truth_vy": [np.nan, np.nan],
+                "truth_vz": [np.nan, np.nan],
+                "truth_yaw": [np.nan, np.nan],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            captured: dict[str, object] = {}
+
+            def fake_export_pipeline_results(**kwargs):
+                captured["result_df"] = kwargs["result_df"].copy()
+                captured["initialization_summary"] = dict(kwargs["initialization_summary"])
+                return {}
+
+            with (
+                patch("eskf_stack.app.load_config", return_value=config),
+                patch(
+                    "eskf_stack.app.load_dataset_from_config",
+                    return_value=DatasetLoadResult(dataframe=sensor_df, source_summary={"adapter_kind": "test"}),
+                ),
+                patch("eskf_stack.app.generate_demo_dataset"),
+                patch("eskf_stack.app.ensure_dir", return_value=Path(temp_dir)),
+                patch("eskf_stack.app.export_pipeline_results", side_effect=fake_export_pipeline_results),
+            ):
+                result_df = run_pipeline()
+
+        self.assertEqual(len(result_df), 2)
+        self.assertTrue(result_df["predict_skipped"].all())
+        self.assertTrue((result_df["predict_reason"] == "not_initialized").all())
+        self.assertTrue((result_df["initialization_phase"] == "WAITING_GNSS").all())
+        self.assertTrue((result_df["initialization_reason"] == "no_gnss_position").all())
+        self.assertTrue(result_df["initialization_pending"].all())
+        self.assertTrue(result_df["est_x"].isna().all())
+        self.assertIn("result_df", captured)
+        self.assertEqual(captured["initialization_summary"]["initialization_phase"], "WAITING_GNSS")
+
+        metrics = compute_metrics(result_df)
+        self.assertEqual(metrics["initialization_row_count"], 2.0)
+        self.assertEqual(metrics["initialization_pending_row_count"], 2.0)
+        self.assertAlmostEqual(metrics["initialization_phase_duration_WAITING_GNSS_s"], 2.0, places=6)
+
+    def test_pipeline_records_bootstrap_wait_diagnostics_before_initialization(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0, 0.05],
+                "ax": [0.0, 0.0],
+                "ay": [0.0, 0.0],
+                "az": [-9.81, -9.81],
+                "gx": [0.0, 0.0],
+                "gy": [0.0, 0.0],
+                "gz": [0.0, 0.0],
+                "gnss_x": [10.0, 10.1],
+                "gnss_y": [20.0, 20.1],
+                "gnss_z": [5.0, 5.0],
+                "gnss_vx": [np.nan, np.nan],
+                "gnss_vy": [np.nan, np.nan],
+                "gnss_vz": [np.nan, np.nan],
+                "baro_h": [np.nan, np.nan],
+                "mag_yaw": [np.nan, np.nan],
+                "truth_x": [np.nan, np.nan],
+                "truth_y": [np.nan, np.nan],
+                "truth_z": [np.nan, np.nan],
+                "truth_vx": [np.nan, np.nan],
+                "truth_vy": [np.nan, np.nan],
+                "truth_vz": [np.nan, np.nan],
+                "truth_yaw": [np.nan, np.nan],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch("eskf_stack.app.load_config", return_value=config),
+                patch(
+                    "eskf_stack.app.load_dataset_from_config",
+                    return_value=DatasetLoadResult(dataframe=sensor_df, source_summary={"adapter_kind": "test"}),
+                ),
+                patch("eskf_stack.app.generate_demo_dataset"),
+                patch("eskf_stack.app.ensure_dir", return_value=Path(temp_dir)),
+                patch("eskf_stack.app.export_pipeline_results", return_value={}),
+            ):
+                result_df = run_pipeline()
+
+        self.assertEqual(len(result_df), 2)
+        self.assertEqual(result_df.loc[0, "initialization_phase"], "WAITING_BOOTSTRAP_MOTION")
+        self.assertEqual(result_df.loc[0, "initialization_reason"], "awaiting_bootstrap_anchor")
+        self.assertAlmostEqual(float(result_df.loc[0, "bootstrap_anchor_age_s"]), 0.0, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "bootstrap_anchor_horizontal_displacement_m"]), 0.0, places=6)
+        self.assertEqual(result_df.loc[1, "initialization_phase"], "WAITING_BOOTSTRAP_MOTION")
+        self.assertEqual(result_df.loc[1, "initialization_reason"], "bootstrap_dt_too_short")
+        self.assertAlmostEqual(float(result_df.loc[1, "bootstrap_anchor_age_s"]), 0.05, places=6)
+        self.assertAlmostEqual(float(result_df.loc[1, "bootstrap_anchor_horizontal_displacement_m"]), np.sqrt(0.02), places=6)
+
+    def test_pipeline_marks_direct_initialization_transition_row(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0, 0.02],
+                "ax": [0.0, 0.0],
+                "ay": [0.0, 0.0],
+                "az": [-9.81, -9.81],
+                "gx": [0.0, 0.0],
+                "gy": [0.0, 0.0],
+                "gz": [0.0, 0.0],
+                "gnss_x": [10.0, 10.04],
+                "gnss_y": [20.0, 20.0],
+                "gnss_z": [5.0, 5.0],
+                "gnss_vx": [2.0, 2.0],
+                "gnss_vy": [0.0, 0.0],
+                "gnss_vz": [0.0, 0.0],
+                "baro_h": [5.0, 5.0],
+                "mag_yaw": [np.nan, np.nan],
+                "truth_x": [np.nan, np.nan],
+                "truth_y": [np.nan, np.nan],
+                "truth_z": [np.nan, np.nan],
+                "truth_vx": [np.nan, np.nan],
+                "truth_vy": [np.nan, np.nan],
+                "truth_vz": [np.nan, np.nan],
+                "truth_yaw": [np.nan, np.nan],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch("eskf_stack.app.load_config", return_value=config),
+                patch(
+                    "eskf_stack.app.load_dataset_from_config",
+                    return_value=DatasetLoadResult(dataframe=sensor_df, source_summary={"adapter_kind": "test"}),
+                ),
+                patch("eskf_stack.app.generate_demo_dataset"),
+                patch("eskf_stack.app.ensure_dir", return_value=Path(temp_dir)),
+                patch("eskf_stack.app.export_pipeline_results", return_value={}),
+            ):
+                result_df = run_pipeline()
+
+        self.assertEqual(len(result_df), 2)
+        self.assertTrue(bool(result_df.loc[0, "initialization_completed_this_frame"]))
+        self.assertFalse(bool(result_df.loc[0, "initialization_pending"]))
+        self.assertEqual(result_df.loc[0, "initialization_phase"], "INITIALIZED")
+        self.assertEqual(result_df.loc[0, "initialization_heading_source"], "gnss_velocity_course")
+        self.assertTrue(bool(result_df.loc[0, "predict_skipped"]))
+        self.assertEqual(result_df.loc[0, "predict_reason"], "initialization_completed_this_frame")
+        self.assertTrue(bool(result_df.loc[0, "used_gnss_pos"]))
+        self.assertTrue(bool(result_df.loc[0, "used_gnss_vel"]))
+        self.assertTrue(np.isnan(result_df.loc[0, "bootstrap_anchor_age_s"]))
+        self.assertFalse(bool(result_df.loc[1, "initialization_completed_this_frame"]))
+        self.assertEqual(result_df.loc[1, "predict_reason"], "applied")
+
+        metrics = compute_metrics(result_df)
+        self.assertEqual(metrics["initialization_completed_row_count"], 1.0)
+        self.assertEqual(metrics["initialization_pending_row_count"], 0.0)
+
+    def test_pipeline_marks_bootstrap_initialization_transition_row(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0, 0.2, 0.22],
+                "ax": [0.0, 0.0, 0.0],
+                "ay": [0.0, 0.0, 0.0],
+                "az": [-9.81, -9.81, -9.81],
+                "gx": [0.0, 0.0, 0.0],
+                "gy": [0.0, 0.0, 0.0],
+                "gz": [0.0, 0.0, 0.0],
+                "gnss_x": [10.0, 12.0, 12.04],
+                "gnss_y": [20.0, 24.0, 24.08],
+                "gnss_z": [5.0, 6.0, 6.02],
+                "gnss_vx": [np.nan, np.nan, np.nan],
+                "gnss_vy": [np.nan, np.nan, np.nan],
+                "gnss_vz": [np.nan, np.nan, np.nan],
+                "baro_h": [np.nan, np.nan, np.nan],
+                "mag_yaw": [np.nan, np.nan, np.nan],
+                "truth_x": [np.nan, np.nan, np.nan],
+                "truth_y": [np.nan, np.nan, np.nan],
+                "truth_z": [np.nan, np.nan, np.nan],
+                "truth_vx": [np.nan, np.nan, np.nan],
+                "truth_vy": [np.nan, np.nan, np.nan],
+                "truth_vz": [np.nan, np.nan, np.nan],
+                "truth_yaw": [np.nan, np.nan, np.nan],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch("eskf_stack.app.load_config", return_value=config),
+                patch(
+                    "eskf_stack.app.load_dataset_from_config",
+                    return_value=DatasetLoadResult(dataframe=sensor_df, source_summary={"adapter_kind": "test"}),
+                ),
+                patch("eskf_stack.app.generate_demo_dataset"),
+                patch("eskf_stack.app.ensure_dir", return_value=Path(temp_dir)),
+                patch("eskf_stack.app.export_pipeline_results", return_value={}),
+            ):
+                result_df = run_pipeline()
+
+        self.assertEqual(len(result_df), 3)
+        self.assertEqual(result_df.loc[0, "initialization_phase"], "WAITING_BOOTSTRAP_MOTION")
+        self.assertTrue(bool(result_df.loc[1, "initialization_completed_this_frame"]))
+        self.assertEqual(result_df.loc[1, "initialization_ready_mode"], "bootstrap_position_pair")
+        self.assertEqual(result_df.loc[1, "initialization_heading_source"], "position_pair_course")
+        self.assertEqual(result_df.loc[1, "predict_reason"], "initialization_completed_this_frame")
+        self.assertAlmostEqual(float(result_df.loc[1, "bootstrap_anchor_age_s"]), 0.2, places=6)
+        self.assertAlmostEqual(float(result_df.loc[1, "bootstrap_anchor_horizontal_displacement_m"]), np.sqrt(20.0), places=6)
+        self.assertFalse(bool(result_df.loc[2, "initialization_completed_this_frame"]))
+        self.assertEqual(result_df.loc[2, "predict_reason"], "applied")
+
+        metrics = compute_metrics(result_df)
+        self.assertEqual(metrics["initialization_completed_row_count"], 1.0)
+        self.assertEqual(metrics["initialization_pending_row_count"], 1.0)
+
+    def test_pipeline_uses_policy_aligned_gnss_rejection_threshold_for_mode_degradation(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+
+        class StrictGnssPositionMeasurement(GnssPositionMeasurement):
+            def policy(self, filter_engine) -> MeasurementPolicy:
+                base_policy = super().policy(filter_engine)
+                return MeasurementPolicy(
+                    adapt_threshold=base_policy.adapt_threshold,
+                    reject_threshold=base_policy.reject_threshold,
+                    recovery_trigger_reject_streak=2,
+                    recovery_window=base_policy.recovery_window,
+                    recovery_max_scale=base_policy.recovery_max_scale,
+                )
+
+        class StrictGnssVelocityMeasurement(GnssVelocityMeasurement):
+            def policy(self, filter_engine) -> MeasurementPolicy:
+                base_policy = super().policy(filter_engine)
+                return MeasurementPolicy(
+                    adapt_threshold=base_policy.adapt_threshold,
+                    reject_threshold=base_policy.reject_threshold,
+                    recovery_trigger_reject_streak=2,
+                    recovery_window=base_policy.recovery_window,
+                    recovery_max_scale=base_policy.recovery_max_scale,
+                )
+
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0, 0.7, 1.4],
+                "ax": [0.0, 0.0, 0.0],
+                "ay": [0.0, 0.0, 0.0],
+                "az": [-9.81, -9.81, -9.81],
+                "gx": [0.0, 0.0, 0.0],
+                "gy": [0.0, 0.0, 0.0],
+                "gz": [0.0, 0.0, 0.0],
+                "gnss_x": [10.0, 100.0, 120.0],
+                "gnss_y": [20.0, 20.0, 20.0],
+                "gnss_z": [5.0, 5.0, 5.0],
+                "gnss_vx": [2.0, 2.0, 2.0],
+                "gnss_vy": [0.0, 0.0, 0.0],
+                "gnss_vz": [0.0, 0.0, 0.0],
+                "baro_h": [np.nan, np.nan, np.nan],
+                "mag_yaw": [np.nan, np.nan, np.nan],
+                "truth_x": [np.nan, np.nan, np.nan],
+                "truth_y": [np.nan, np.nan, np.nan],
+                "truth_z": [np.nan, np.nan, np.nan],
+                "truth_vx": [np.nan, np.nan, np.nan],
+                "truth_vy": [np.nan, np.nan, np.nan],
+                "truth_vz": [np.nan, np.nan, np.nan],
+                "truth_yaw": [np.nan, np.nan, np.nan],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch("eskf_stack.app.load_config", return_value=config),
+                patch(
+                    "eskf_stack.app.load_dataset_from_config",
+                    return_value=DatasetLoadResult(dataframe=sensor_df, source_summary={"adapter_kind": "test"}),
+                ),
+                patch("eskf_stack.app._build_measurements", return_value=[StrictGnssPositionMeasurement(), StrictGnssVelocityMeasurement()]),
+                patch("eskf_stack.app.generate_demo_dataset"),
+                patch("eskf_stack.app.ensure_dir", return_value=Path(temp_dir)),
+                patch("eskf_stack.app.export_pipeline_results", return_value={}),
+            ):
+                result_df = run_pipeline()
+
+        self.assertEqual(len(result_df), 3)
+        self.assertTrue(bool(result_df.loc[1, "gnss_pos_rejected"]))
+        self.assertTrue(bool(result_df.loc[2, "gnss_pos_rejected"]))
+        self.assertEqual(result_df.loc[2, "mode"], "GNSS_DEGRADED")
+        self.assertEqual(result_df.loc[2, "mode_reason"], "partial_gnss_with_rejections")
 
     def test_initialization_status_reports_ready_direct_init(self) -> None:
         config = load_config(PROJECT_ROOT / "01_data" / "config.json")
@@ -467,7 +773,10 @@ class AppInitializationTests(unittest.TestCase):
                         innovation_value=6.0,
                         nis=18.0,
                         rejected=True,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
                         mode_scale=2.0,
+                        applied_r_scale=2.0,
                         management_mode="reject",
                     )
                 return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
@@ -497,7 +806,374 @@ class AppInitializationTests(unittest.TestCase):
         self.assertFalse(bool(result_df.loc[0, "used_gnss_pos"]))
         self.assertTrue(bool(result_df.loc[0, "gnss_pos_rejected"]))
         self.assertEqual(result_df.loc[0, "gnss_pos_management_mode"], "reject")
+        self.assertAlmostEqual(
+            float(result_df.loc[0, "gnss_pos_nis_adapt_threshold"]),
+            config.innovation_management.gnss_pos_nis_adapt_threshold,
+            places=6,
+        )
+        self.assertAlmostEqual(
+            float(result_df.loc[0, "gnss_pos_nis_reject_threshold"]),
+            config.innovation_management.gnss_pos_nis_reject_threshold,
+            places=6,
+        )
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_pos_adaptation_scale"]), 1.0, places=6)
         self.assertAlmostEqual(float(result_df.loc[0, "gnss_pos_mode_scale"]), 2.0, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_pos_applied_r_scale"]), 2.0, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_pos_r_scale"]), 2.0, places=6)
+
+    def test_pipeline_records_gnss_position_and_velocity_outputs_for_metrics(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0],
+                "ax": [0.0],
+                "ay": [0.0],
+                "az": [-9.81],
+                "gx": [0.0],
+                "gy": [0.0],
+                "gz": [0.0],
+                "gnss_x": [10.0],
+                "gnss_y": [20.0],
+                "gnss_z": [5.0],
+                "gnss_vx": [1.0],
+                "gnss_vy": [2.0],
+                "gnss_vz": [0.5],
+                "baro_h": [np.nan],
+                "mag_yaw": [np.nan],
+                "truth_x": [np.nan],
+                "truth_y": [np.nan],
+                "truth_z": [np.nan],
+                "truth_vx": [np.nan],
+                "truth_vy": [np.nan],
+                "truth_vz": [np.nan],
+                "truth_yaw": [np.nan],
+            }
+        )
+
+        class FakeMeasurementManager:
+            def process(self, filter_engine, model, frame, current_mode=None):
+                if model.name == "gnss_pos":
+                    return MeasurementResult(
+                        name="gnss_pos",
+                        available=True,
+                        used=True,
+                        innovation_value=3.5,
+                        nis=2.5,
+                        rejected=False,
+                        adaptation_scale=1.2,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.2,
+                        management_mode="update",
+                    )
+                if model.name == "gnss_vel":
+                    return MeasurementResult(
+                        name="gnss_vel",
+                        available=True,
+                        used=True,
+                        innovation_value=1.5,
+                        nis=1.25,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            captured: dict[str, object] = {}
+
+            def fake_export_pipeline_results(**kwargs):
+                captured["result_df"] = kwargs["result_df"].copy()
+                captured["extra_metrics"] = dict(kwargs["extra_metrics"])
+                return {}
+
+            with (
+                patch("eskf_stack.app.load_config", return_value=config),
+                patch(
+                    "eskf_stack.app.load_dataset_from_config",
+                    return_value=DatasetLoadResult(dataframe=sensor_df, source_summary={"adapter_kind": "test"}),
+                ),
+                patch("eskf_stack.app.MeasurementManager", return_value=FakeMeasurementManager()),
+                patch("eskf_stack.app.generate_demo_dataset"),
+                patch("eskf_stack.app.ensure_dir", return_value=Path(temp_dir)),
+                patch("eskf_stack.app.export_pipeline_results", side_effect=fake_export_pipeline_results),
+            ):
+                result_df = run_pipeline()
+
+        self.assertEqual(len(result_df), 1)
+        self.assertIn("result_df", captured)
+        self.assertTrue(bool(result_df.loc[0, "used_gnss_pos"]))
+        self.assertTrue(bool(result_df.loc[0, "used_gnss_vel"]))
+        self.assertFalse(bool(result_df.loc[0, "gnss_pos_rejected"]))
+        self.assertFalse(bool(result_df.loc[0, "gnss_vel_rejected"]))
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_pos_innovation_norm"]), 3.5, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_vel_innovation_norm"]), 1.5, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_pos_nis"]), 2.5, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_vel_nis"]), 1.25, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_pos_adaptation_scale"]), 1.2, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_vel_adaptation_scale"]), 1.0, places=6)
+
+        metrics = compute_metrics(result_df)
+        self.assertEqual(metrics["gnss_pos_updates"], 1.0)
+        self.assertEqual(metrics["gnss_vel_updates"], 1.0)
+        self.assertAlmostEqual(metrics["mean_gnss_pos_innovation"], 3.5, places=6)
+        self.assertAlmostEqual(metrics["mean_gnss_vel_innovation"], 1.5, places=6)
+        self.assertAlmostEqual(metrics["mean_gnss_pos_nis"], 2.5, places=6)
+        self.assertAlmostEqual(metrics["mean_gnss_vel_nis"], 1.25, places=6)
+
+    def test_pipeline_records_reject_bypass_for_gnss_measurements(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0],
+                "ax": [0.0],
+                "ay": [0.0],
+                "az": [-9.81],
+                "gx": [0.0],
+                "gy": [0.0],
+                "gz": [0.0],
+                "gnss_x": [10.0],
+                "gnss_y": [20.0],
+                "gnss_z": [5.0],
+                "gnss_vx": [1.0],
+                "gnss_vy": [0.0],
+                "gnss_vz": [0.0],
+                "baro_h": [np.nan],
+                "mag_yaw": [np.nan],
+                "truth_x": [np.nan],
+                "truth_y": [np.nan],
+                "truth_z": [np.nan],
+                "truth_vx": [np.nan],
+                "truth_vy": [np.nan],
+                "truth_vz": [np.nan],
+                "truth_yaw": [np.nan],
+            }
+        )
+
+        class FakeMeasurementManager:
+            def process(self, filter_engine, model, frame, current_mode=None):
+                if model.name == "gnss_pos":
+                    return MeasurementResult(
+                        name="gnss_pos",
+                        available=True,
+                        used=True,
+                        innovation_value=4.0,
+                        nis=18.0,
+                        rejected=False,
+                        reject_bypassed=True,
+                        adaptation_scale=2.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=2.0,
+                        management_mode="update",
+                    )
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch("eskf_stack.app.load_config", return_value=config),
+                patch(
+                    "eskf_stack.app.load_dataset_from_config",
+                    return_value=DatasetLoadResult(dataframe=sensor_df, source_summary={"adapter_kind": "test"}),
+                ),
+                patch("eskf_stack.app.MeasurementManager", return_value=FakeMeasurementManager()),
+                patch("eskf_stack.app.generate_demo_dataset"),
+                patch("eskf_stack.app.ensure_dir", return_value=Path(temp_dir)),
+                patch("eskf_stack.app.export_pipeline_results", return_value={}),
+            ):
+                result_df = run_pipeline()
+
+        self.assertEqual(len(result_df), 1)
+        self.assertTrue(bool(result_df.loc[0, "used_gnss_pos"]))
+        self.assertFalse(bool(result_df.loc[0, "gnss_pos_rejected"]))
+        self.assertTrue(bool(result_df.loc[0, "gnss_pos_reject_bypassed"]))
+
+        metrics = compute_metrics(result_df)
+        self.assertEqual(metrics["gnss_pos_reject_bypassed_updates"], 1.0)
+        self.assertEqual(metrics["gnss_pos_nis_reject_policy_bypass_count"], 1.0)
+        self.assertAlmostEqual(metrics["gnss_pos_nis_reject_policy_bypass_pct"], 100.0, places=6)
+
+    def test_pipeline_records_baro_and_mag_outputs_for_metrics(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0],
+                "ax": [0.0],
+                "ay": [0.0],
+                "az": [-9.81],
+                "gx": [0.0],
+                "gy": [0.0],
+                "gz": [0.0],
+                "gnss_x": [10.0],
+                "gnss_y": [20.0],
+                "gnss_z": [5.0],
+                "gnss_vx": [np.nan],
+                "gnss_vy": [np.nan],
+                "gnss_vz": [np.nan],
+                "baro_h": [12.3],
+                "mag_yaw": [0.4],
+                "truth_x": [np.nan],
+                "truth_y": [np.nan],
+                "truth_z": [np.nan],
+                "truth_vx": [np.nan],
+                "truth_vy": [np.nan],
+                "truth_vz": [np.nan],
+                "truth_yaw": [np.nan],
+            }
+        )
+
+        class FakeMeasurementManager:
+            def process(self, filter_engine, model, frame, current_mode=None):
+                if model.name == "baro":
+                    return MeasurementResult(
+                        name="baro",
+                        available=True,
+                        used=True,
+                        innovation_value=0.8,
+                        nis=1.6,
+                        rejected=False,
+                        adaptation_scale=1.1,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.1,
+                        management_mode="update",
+                    )
+                if model.name == "mag":
+                    return MeasurementResult(
+                        name="mag",
+                        available=True,
+                        used=False,
+                        innovation_value=12.0,
+                        nis=9.0,
+                        rejected=True,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="reject",
+                    )
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            captured: dict[str, object] = {}
+
+            def fake_export_pipeline_results(**kwargs):
+                captured["result_df"] = kwargs["result_df"].copy()
+                return {}
+
+            with (
+                patch("eskf_stack.app.load_config", return_value=config),
+                patch(
+                    "eskf_stack.app.load_dataset_from_config",
+                    return_value=DatasetLoadResult(dataframe=sensor_df, source_summary={"adapter_kind": "test"}),
+                ),
+                patch("eskf_stack.app.MeasurementManager", return_value=FakeMeasurementManager()),
+                patch("eskf_stack.app.generate_demo_dataset"),
+                patch("eskf_stack.app.ensure_dir", return_value=Path(temp_dir)),
+                patch("eskf_stack.app.export_pipeline_results", side_effect=fake_export_pipeline_results),
+            ):
+                result_df = run_pipeline()
+
+        self.assertEqual(len(result_df), 1)
+        self.assertIn("result_df", captured)
+        self.assertTrue(bool(result_df.loc[0, "available_baro"]))
+        self.assertTrue(bool(result_df.loc[0, "available_mag"]))
+        self.assertTrue(bool(result_df.loc[0, "used_baro"]))
+        self.assertFalse(bool(result_df.loc[0, "used_mag"]))
+        self.assertFalse(bool(result_df.loc[0, "baro_rejected"]))
+        self.assertTrue(bool(result_df.loc[0, "mag_rejected"]))
+        self.assertEqual(int(result_df.loc[0, "baro_reject_streak"]), 0)
+        self.assertEqual(int(result_df.loc[0, "mag_reject_streak"]), 1)
+        self.assertEqual(int(result_df.loc[0, "gnss_pos_adaptive_streak"]), 0)
+        self.assertEqual(int(result_df.loc[0, "gnss_vel_adaptive_streak"]), 0)
+        self.assertEqual(int(result_df.loc[0, "baro_adaptive_streak"]), 1)
+        self.assertEqual(int(result_df.loc[0, "mag_adaptive_streak"]), 0)
+        self.assertAlmostEqual(float(result_df.loc[0, "baro_outage_s"]), 0.0, places=6)
+        self.assertTrue(np.isinf(result_df.loc[0, "mag_outage_s"]))
+        self.assertAlmostEqual(float(result_df.loc[0, "auxiliary_outage_s"]), 0.0, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "baro_innovation_abs"]), 0.8, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "yaw_innovation_abs_deg"]), 12.0, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "baro_nis"]), 1.6, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "mag_nis"]), 9.0, places=6)
+
+        metrics = compute_metrics(result_df)
+        self.assertEqual(metrics["baro_available_measurements"], 1.0)
+        self.assertEqual(metrics["mag_available_measurements"], 1.0)
+        self.assertEqual(metrics["baro_updates"], 1.0)
+        self.assertEqual(metrics["mag_updates"], 0.0)
+        self.assertEqual(metrics["mag_rejections"], 1.0)
+        self.assertEqual(metrics["max_baro_reject_streak"], 0.0)
+        self.assertEqual(metrics["max_mag_reject_streak"], 1.0)
+        self.assertEqual(metrics["max_gnss_pos_adaptive_streak"], 0.0)
+        self.assertEqual(metrics["max_gnss_vel_adaptive_streak"], 0.0)
+        self.assertEqual(metrics["max_baro_adaptive_streak"], 1.0)
+        self.assertEqual(metrics["max_mag_adaptive_streak"], 0.0)
+        self.assertAlmostEqual(metrics["max_baro_outage_s"], 0.0, places=6)
+        self.assertTrue(np.isinf(metrics["max_mag_outage_s"]))
+        self.assertAlmostEqual(metrics["max_auxiliary_outage_s"], 0.0, places=6)
+        self.assertAlmostEqual(metrics["mean_baro_innovation"], 0.8, places=6)
+        self.assertAlmostEqual(metrics["mean_mag_innovation"], 12.0, places=6)
+        self.assertAlmostEqual(metrics["mean_baro_nis"], 1.6, places=6)
+        self.assertAlmostEqual(metrics["mean_mag_nis"], 9.0, places=6)
+
+    def test_pipeline_keeps_missing_baro_and_mag_innovations_as_nan(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0],
+                "ax": [0.0],
+                "ay": [0.0],
+                "az": [-9.81],
+                "gx": [0.0],
+                "gy": [0.0],
+                "gz": [0.0],
+                "gnss_x": [10.0],
+                "gnss_y": [20.0],
+                "gnss_z": [5.0],
+                "gnss_vx": [1.0],
+                "gnss_vy": [0.0],
+                "gnss_vz": [0.0],
+                "baro_h": [np.nan],
+                "mag_yaw": [np.nan],
+                "truth_x": [np.nan],
+                "truth_y": [np.nan],
+                "truth_z": [np.nan],
+                "truth_vx": [np.nan],
+                "truth_vy": [np.nan],
+                "truth_vz": [np.nan],
+                "truth_yaw": [np.nan],
+            }
+        )
+
+        class FakeMeasurementManager:
+            def process(self, filter_engine, model, frame, current_mode=None):
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch("eskf_stack.app.load_config", return_value=config),
+                patch(
+                    "eskf_stack.app.load_dataset_from_config",
+                    return_value=DatasetLoadResult(dataframe=sensor_df, source_summary={"adapter_kind": "test"}),
+                ),
+                patch("eskf_stack.app.MeasurementManager", return_value=FakeMeasurementManager()),
+                patch("eskf_stack.app.generate_demo_dataset"),
+                patch("eskf_stack.app.ensure_dir", return_value=Path(temp_dir)),
+                patch("eskf_stack.app.export_pipeline_results", return_value={}),
+            ):
+                result_df = run_pipeline()
+
+        self.assertEqual(len(result_df), 1)
+        self.assertTrue(np.isnan(result_df.loc[0, "baro_innovation_abs"]))
+        self.assertTrue(np.isnan(result_df.loc[0, "yaw_innovation_abs_deg"]))
+        metrics = compute_metrics(result_df)
+        self.assertEqual(metrics["baro_available_measurements"], 0.0)
+        self.assertEqual(metrics["mag_available_measurements"], 0.0)
+        self.assertNotIn("mean_baro_innovation", metrics)
+        self.assertNotIn("mean_mag_innovation", metrics)
 
 
 if __name__ == "__main__":

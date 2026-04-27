@@ -7,6 +7,7 @@ import numpy as np
 
 from ..adapters.csv_dataset import ObservationFrame
 from ..core.filter import OfflineESKF
+from ..core.math_utils import solve_linear_system
 
 
 @dataclass
@@ -17,6 +18,7 @@ class MeasurementResult:
     innovation_value: float = 0.0
     nis: float | None = None
     rejected: bool = False
+    reject_bypassed: bool = False
     adaptation_scale: float = 1.0
     recovery_scale: float = 1.0
     mode_scale: float = 1.0
@@ -46,11 +48,8 @@ def innovation_covariance(filter_engine: OfflineESKF, H: np.ndarray, R: np.ndarr
 
 
 def mahalanobis_squared(residual: np.ndarray, covariance: np.ndarray) -> float:
-    try:
-        inverse = np.linalg.inv(covariance)
-    except np.linalg.LinAlgError:
-        inverse = np.linalg.pinv(covariance)
-    return float(residual.T @ inverse @ residual)
+    solved_residual = solve_linear_system(covariance, residual)
+    return float(residual.T @ solved_residual)
 
 
 class MeasurementModel(ABC):
