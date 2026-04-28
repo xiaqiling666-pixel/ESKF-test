@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .quality import CovarianceHealthStatus, SensorStatus
+from .quality import CovarianceHealthStatus, MeasurementSupportSummary, SensorStatus, summarize_measurement_support
 
 
 @dataclass(frozen=True)
@@ -16,9 +16,23 @@ class ModeThresholds:
     gnss_reject_streak_degraded: int = 3
     gnss_reject_bypass_streak_degraded: int = 2
     gnss_adaptive_streak_degraded: int = 3
+    gnss_skip_streak_degraded: int = 2
     auxiliary_reject_streak_degraded: int = 2
     auxiliary_reject_bypass_streak_degraded: int = 2
     auxiliary_adaptive_streak_degraded: int = 3
+    auxiliary_skip_streak_degraded: int = 2
+    gnss_reject_bypass_quality_floor: float = 75.0
+    gnss_adaptive_quality_floor: float = 75.0
+    full_gnss_quality_floor: float = 65.0
+    partial_gnss_adaptive_quality_floor: float = 65.0
+    partial_gnss_aux_instability_quality_floor: float = 55.0
+    short_outage_aux_instability_quality_floor: float = 45.0
+    extended_outage_aux_instability_quality_floor: float = 35.0
+    gnss_short_outage_threshold_s: float = 2.0
+    gnss_extended_outage_threshold_s: float = 5.0
+    auxiliary_available_outage_threshold_s: float = 1.0
+    covariance_caution_duration_threshold_s: float = 0.4
+    covariance_unhealthy_duration_threshold_s: float = 0.2
 
 
 @dataclass(frozen=True)
@@ -148,78 +162,101 @@ def determine_mode(
     quality_score: float,
     covariance_health: CovarianceHealthStatus,
     thresholds: ModeThresholds | None = None,
+    support_summary: MeasurementSupportSummary | None = None,
 ) -> ModeDecision:
     thresholds = thresholds or ModeThresholds()
+    support = support_summary or summarize_measurement_support(
+        sensor_status,
+        gnss_skip_streak_degraded=thresholds.gnss_skip_streak_degraded,
+        auxiliary_reject_streak_degraded=thresholds.auxiliary_reject_streak_degraded,
+        auxiliary_reject_bypass_streak_degraded=thresholds.auxiliary_reject_bypass_streak_degraded,
+        auxiliary_adaptive_streak_degraded=thresholds.auxiliary_adaptive_streak_degraded,
+        auxiliary_skip_streak_degraded=thresholds.auxiliary_skip_streak_degraded,
+    )
     gnss_reject_streak = max(sensor_status.gnss_pos_reject_streak, sensor_status.gnss_vel_reject_streak)
     gnss_reject_bypass_streak = max(
         sensor_status.gnss_pos_reject_bypass_streak,
         sensor_status.gnss_vel_reject_bypass_streak,
     )
-    auxiliary_reject_streak = max(sensor_status.baro_reject_streak, sensor_status.mag_reject_streak)
-    auxiliary_reject_bypass_streak = max(
-        sensor_status.baro_reject_bypass_streak,
-        sensor_status.mag_reject_bypass_streak,
-    )
     gnss_adaptive_streak = max(sensor_status.gnss_pos_adaptive_streak, sensor_status.gnss_vel_adaptive_streak)
-    auxiliary_adaptive_streak = max(sensor_status.baro_adaptive_streak, sensor_status.mag_adaptive_streak)
-    recent_any_gnss = sensor_status.recent_gnss_pos or sensor_status.recent_gnss_vel
-    recent_any_auxiliary = sensor_status.recent_baro or sensor_status.recent_mag
     covariance_caution = covariance_health.caution
     covariance_unhealthy = covariance_health.unhealthy
-    persistent_caution = covariance_health.caution_duration_s >= 0.4
-    persistent_unhealthy = covariance_health.unhealthy_duration_s >= 0.2
+    persistent_caution = covariance_health.caution_duration_s >= thresholds.covariance_caution_duration_threshold_s
+    persistent_unhealthy = covariance_health.unhealthy_duration_s >= thresholds.covariance_unhealthy_duration_threshold_s
 
-    if sensor_status.recent_gnss_pos and sensor_status.recent_gnss_vel:
+    if support.full_gnss_support:
         if gnss_reject_streak >= thresholds.gnss_reject_streak_degraded:
             return ModeDecision("GNSS_DEGRADED", "gnss_rejection_streak")
         if gnss_reject_bypass_streak >= thresholds.gnss_reject_bypass_streak_degraded:
             return ModeDecision("GNSS_DEGRADED", "gnss_reject_bypass_streak")
-        if gnss_adaptive_streak >= thresholds.gnss_adaptive_streak_degraded and quality_score < 75.0:
+        if (
+            gnss_adaptive_streak >= thresholds.gnss_adaptive_streak_degraded
+            and quality_score < thresholds.gnss_adaptive_quality_floor
+        ):
             return ModeDecision("GNSS_DEGRADED", "gnss_adaptive_scaling_streak")
-        if quality_score < 65.0:
+        if quality_score < thresholds.full_gnss_quality_floor:
             return ModeDecision("GNSS_DEGRADED", "quality_drop_under_gnss")
-        if covariance_caution and persistent_caution and quality_score < 65.0:
-            return ModeDecision("GNSS_DEGRADED", covariance_health.reason)
+        if covariance_caution and persistent_caution:
+            if covariance_health.reason != "multiple_caution_sigmas" or quality_score < thresholds.full_gnss_quality_floor:
+                return ModeDecision("GNSS_DEGRADED", covariance_health.reason)
         return ModeDecision("GNSS_STABLE", "fresh_gnss_and_healthy_covariance")
 
-    if recent_any_gnss:
+    if support.recent_any_gnss:
         if gnss_reject_streak >= thresholds.gnss_reject_streak_degraded:
             return ModeDecision("GNSS_DEGRADED", "partial_gnss_with_rejections")
-        if gnss_reject_bypass_streak >= thresholds.gnss_reject_bypass_streak_degraded and quality_score < 75.0:
+        if (
+            gnss_reject_bypass_streak >= thresholds.gnss_reject_bypass_streak_degraded
+            and quality_score < thresholds.gnss_reject_bypass_quality_floor
+        ):
             return ModeDecision("GNSS_DEGRADED", "gnss_reject_bypass_streak")
-        if gnss_adaptive_streak >= max(2, thresholds.gnss_adaptive_streak_degraded - 1) and quality_score < 65.0:
+        if (
+            gnss_adaptive_streak >= max(2, thresholds.gnss_adaptive_streak_degraded - 1)
+            and quality_score < thresholds.partial_gnss_adaptive_quality_floor
+        ):
             return ModeDecision("GNSS_DEGRADED", "gnss_adaptive_scaling_streak")
-        if not recent_any_auxiliary and sensor_status.auxiliary_outage_s > 1.0:
+        if not support.recent_any_auxiliary and support.recent_any_auxiliary_available:
+            return ModeDecision("GNSS_DEGRADED", "auxiliary_available_without_successful_updates")
+        if not support.recent_any_auxiliary and sensor_status.auxiliary_available_outage_s > thresholds.auxiliary_available_outage_threshold_s:
             return ModeDecision("GNSS_DEGRADED", "partial_gnss_without_aux_support")
         if (
-            auxiliary_reject_streak >= thresholds.auxiliary_reject_streak_degraded
-            or auxiliary_reject_bypass_streak >= thresholds.auxiliary_reject_bypass_streak_degraded
-            or auxiliary_adaptive_streak >= thresholds.auxiliary_adaptive_streak_degraded
-        ) and quality_score < 55.0:
+            support.auxiliary_instability_without_backup
+            and quality_score < thresholds.partial_gnss_aux_instability_quality_floor
+        ):
             return ModeDecision("GNSS_DEGRADED", "auxiliary_sensor_instability")
         if covariance_unhealthy and persistent_unhealthy:
             return ModeDecision("GNSS_DEGRADED", covariance_health.reason)
         return ModeDecision("GNSS_AVAILABLE", "partial_or_recovering_gnss")
 
-    if sensor_status.gnss_outage_s <= 2.0 and not recent_any_auxiliary:
+    if support.gnss_available_without_successful_updates:
+        return ModeDecision("DEGRADED", "gnss_available_without_successful_updates")
+
+    if sensor_status.gnss_outage_s <= thresholds.gnss_short_outage_threshold_s and not support.recent_any_auxiliary:
+        if support.recent_any_auxiliary_available:
+            return ModeDecision("DEGRADED", "auxiliary_available_without_successful_updates")
         return ModeDecision("DEGRADED", "gnss_outage_without_aux_support")
-    if sensor_status.gnss_outage_s <= 2.0 and (
-        auxiliary_reject_streak >= thresholds.auxiliary_reject_streak_degraded
-        or auxiliary_reject_bypass_streak >= thresholds.auxiliary_reject_bypass_streak_degraded
-        or auxiliary_adaptive_streak >= thresholds.auxiliary_adaptive_streak_degraded
-    ) and quality_score < 45.0:
+    if (
+        sensor_status.gnss_outage_s <= thresholds.gnss_short_outage_threshold_s
+        and support.auxiliary_instability_without_backup
+        and quality_score < thresholds.short_outage_aux_instability_quality_floor
+    ):
         return ModeDecision("DEGRADED", "auxiliary_sensor_instability")
-    if sensor_status.gnss_outage_s <= 2.0 and recent_any_auxiliary and not persistent_unhealthy:
+    if sensor_status.gnss_outage_s <= thresholds.gnss_short_outage_threshold_s and support.recent_any_auxiliary and not persistent_unhealthy:
         return ModeDecision("INERTIAL_HOLD", "short_gnss_outage")
-    if sensor_status.gnss_outage_s <= 5.0 and not recent_any_auxiliary and sensor_status.auxiliary_outage_s > 1.0:
+    if sensor_status.gnss_outage_s <= thresholds.gnss_extended_outage_threshold_s and not support.recent_any_auxiliary and support.recent_any_auxiliary_available:
+        return ModeDecision("DEGRADED", "auxiliary_available_without_successful_updates")
+    if (
+        sensor_status.gnss_outage_s <= thresholds.gnss_extended_outage_threshold_s
+        and not support.recent_any_auxiliary
+        and sensor_status.auxiliary_available_outage_s > thresholds.auxiliary_available_outage_threshold_s
+    ):
         return ModeDecision("DEGRADED", "extended_outage_without_aux_support")
-    if sensor_status.gnss_outage_s <= 5.0 and (
-        auxiliary_reject_streak >= thresholds.auxiliary_reject_streak_degraded
-        or auxiliary_reject_bypass_streak >= thresholds.auxiliary_reject_bypass_streak_degraded
-        or auxiliary_adaptive_streak >= thresholds.auxiliary_adaptive_streak_degraded
-    ) and quality_score < 35.0:
+    if (
+        sensor_status.gnss_outage_s <= thresholds.gnss_extended_outage_threshold_s
+        and support.auxiliary_instability_without_backup
+        and quality_score < thresholds.extended_outage_aux_instability_quality_floor
+    ):
         return ModeDecision("DEGRADED", "auxiliary_sensor_instability")
-    if sensor_status.gnss_outage_s <= 5.0 and recent_any_auxiliary and not persistent_unhealthy:
+    if sensor_status.gnss_outage_s <= thresholds.gnss_extended_outage_threshold_s and support.recent_any_auxiliary and not persistent_unhealthy:
         return ModeDecision("INERTIAL_HOLD", "extended_gnss_outage")
     if covariance_unhealthy and persistent_unhealthy:
         return ModeDecision("DEGRADED", covariance_health.reason)

@@ -185,6 +185,38 @@
 - `*_r_scale`
 - `*_recovery_scale`
 - `*_management_mode`
+- `*_reject_bypassed`
+- `*_reject_streak`
+- `*_reject_bypass_streak`
+- `*_adaptive_streak`
+- `*_outage_s`
+
+如果要看观测管理到底做了什么，
+不要只看 `used_*`。
+
+建议按这个顺序看：
+
+1. `available_*`
+   先判断这一帧有没有观测。
+
+2. `*_management_mode`
+   再判断 manager 最终把这一帧量测归成：
+   - `update`
+   - `reject`
+   - `recover`
+   - `skip`
+
+3. `*_rejected` 和 `*_reject_bypassed`
+   区分：
+   - 真的被拒绝
+   - 超过 reject 阈值但被策略放行
+
+4. `*_r_scale / *_recovery_scale`
+   判断本帧是否进入了自适应放大或恢复阶段。
+
+5. `*_reject_streak / *_reject_bypass_streak / *_adaptive_streak`
+   判断异常是单帧噪声，
+   还是已经累积成连续退化信号。
 
 状态机和质量：
 - `quality_score`
@@ -277,6 +309,24 @@
    - `initialization_zero_yaw_fallback_used_flag`
    - `initialization_wait_s`
 
+9. 当前主线最值得优先看的 metrics
+   如果是最低完整项目验收，
+   建议先看：
+   - `initialization_completed_flag`
+   - `initialization_completed_row_count`
+   - `max_initialization_wait_s`
+   - `gnss_pos_updates / gnss_vel_updates`
+   - `baro_updates / mag_updates`
+   - `gnss_pos_rejections / gnss_vel_rejections`
+   - `gnss_pos_management_count_recover / gnss_vel_management_count_recover`
+   - `max_gnss_pos_reject_streak`
+   - `max_gnss_pos_reject_bypass_streak`
+   - `max_auxiliary_outage_s`
+   - `covariance_unhealthy_duration_s`
+
+如果这些主线指标已经能解释清楚系统行为，
+再去看更细的 NIS、innovation 和图表。
+
 常见 `category` 包括：
 - `input_quality`
 - `initialization`
@@ -294,14 +344,15 @@
 这个文件更适合人工快速阅读。
 
 它会先写初始化摘要，
-再写指标键值。
+再按主线 section 写指标键值。
 
 如果只是想快速确认本次运行：
 1. 初始化是否成功
 2. 用了哪种初始化方式
 3. 是否用了 static coarse alignment
 4. 是否触发 zero yaw fallback
-5. 是否存在明显输入质量问题
+5. GNSS / baro / mag 是否真的被更新、拒绝、恢复或跳过
+6. 是否存在明显输入质量问题
 
 优先看这个文件。
 
@@ -356,12 +407,15 @@
 九、当前不能过度解读的内容
 
 1. `quality_score`
-   当前主要是诊断评分，
-   还没有正式作为滤波权重控制变量。
+   当前已经开始参与 mode 判定，
+   但仍然主要是 heuristic 诊断分数，
+   还不是正式的概率化质量量。
 
 2. `mode`
-   当前主要是状态机标签和统计，
-   还没有完整反作用于量测准入策略。
+   当前已经和 reject/adaptive/bypass/outage 等主线统计联动，
+   但还没有形成完整的
+   `quality/mode -> filter gain / R_eff`
+   闭环方法。
 
 3. `config_experiment_full_method.json`
    当前只是完整原型策略模板，

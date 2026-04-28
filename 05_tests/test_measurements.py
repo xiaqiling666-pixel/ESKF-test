@@ -78,6 +78,28 @@ class DummyMeasurement(MeasurementModel):
         )
 
 
+class UnavailableMeasurement(MeasurementModel):
+    freshness_timeout_s = 1.0
+    name = "unavailable_dummy"
+
+    def is_available(self, frame: ObservationFrame) -> bool:
+        return False
+
+    def build_update(self, filter_engine, frame: ObservationFrame) -> MeasurementUpdate | None:
+        return None
+
+
+class SkipMeasurement(MeasurementModel):
+    freshness_timeout_s = 1.0
+    name = "skip_dummy"
+
+    def is_available(self, frame: ObservationFrame) -> bool:
+        return True
+
+    def build_update(self, filter_engine, frame: ObservationFrame) -> MeasurementUpdate | None:
+        return None
+
+
 class MeasurementManagerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.config = load_config(PROJECT_ROOT / "01_data" / "config.json")
@@ -103,6 +125,28 @@ class MeasurementManagerTests(unittest.TestCase):
         self.assertFalse(result.used)
         self.assertTrue(result.rejected)
         self.assertEqual(result.management_mode, "reject")
+        self.assertIsNone(self.filter_engine.last_R)
+
+    def test_manager_marks_unavailable_measurement_explicitly(self) -> None:
+        model = UnavailableMeasurement()
+
+        result = self.manager.process(self.filter_engine, model, self.frame)
+
+        self.assertFalse(result.available)
+        self.assertFalse(result.used)
+        self.assertFalse(result.rejected)
+        self.assertEqual(result.management_mode, "unavailable")
+        self.assertIsNone(self.filter_engine.last_R)
+
+    def test_manager_marks_available_but_skipped_measurement_explicitly(self) -> None:
+        model = SkipMeasurement()
+
+        result = self.manager.process(self.filter_engine, model, self.frame)
+
+        self.assertTrue(result.available)
+        self.assertFalse(result.used)
+        self.assertFalse(result.rejected)
+        self.assertEqual(result.management_mode, "skip")
         self.assertIsNone(self.filter_engine.last_R)
 
     def test_manager_can_disable_nis_rejection_for_baseline_runs(self) -> None:

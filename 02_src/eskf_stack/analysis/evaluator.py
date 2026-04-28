@@ -29,12 +29,14 @@ def metric_category(metric_name: str) -> str:
             or metric_name == f"mean_{sensor_name}_nis"
             or metric_name == f"max_{sensor_name}_nis"
             or metric_name == f"max_{sensor_name}_reject_streak"
+            or metric_name == f"max_{sensor_name}_skip_streak"
             or metric_name == f"max_{sensor_name}_reject_bypass_streak"
             or metric_name == f"max_{sensor_name}_adaptive_streak"
             or metric_name == f"max_{sensor_name}_outage_s"
+            or metric_name == f"max_{sensor_name}_available_outage_s"
         ):
             return "measurement_management"
-    if metric_name.startswith("auxiliary_") or metric_name == "max_auxiliary_outage_s":
+    if metric_name.startswith("auxiliary_") or metric_name in {"max_auxiliary_outage_s", "max_auxiliary_available_outage_s"}:
         return "measurement_management"
     if metric_name.startswith(("gnss_", "baro_", "mag_")):
         return "measurement_management"
@@ -357,7 +359,7 @@ def _add_management_mode_metrics(metrics: dict[str, float], result_df: pd.DataFr
         return
 
     management_modes = result_df[management_mode_column].fillna("").astype(str)
-    for mode_name in ("update", "reject", "recover", "skip"):
+    for mode_name in ("update", "reject", "recover", "skip", "unavailable", "pending_init"):
         metrics[f"{sensor_name}_management_count_{mode_name}"] = float((management_modes == mode_name).sum())
 
 
@@ -514,11 +516,15 @@ def compute_metrics(
     _add_innovation_metrics(metrics, result_df, "mag", "yaw_innovation_abs_deg")
     for sensor_name in ("gnss_pos", "gnss_vel", "baro", "mag"):
         reject_streak_column = f"{sensor_name}_reject_streak"
+        skip_streak_column = f"{sensor_name}_skip_streak"
         reject_bypass_streak_column = f"{sensor_name}_reject_bypass_streak"
         adaptive_streak_column = f"{sensor_name}_adaptive_streak"
         outage_column = f"{sensor_name}_outage_s"
+        available_outage_column = f"{sensor_name}_available_outage_s"
         if reject_streak_column in result_df.columns:
             metrics[f"max_{sensor_name}_reject_streak"] = float(pd.to_numeric(result_df[reject_streak_column], errors="coerce").max())
+        if skip_streak_column in result_df.columns:
+            metrics[f"max_{sensor_name}_skip_streak"] = float(pd.to_numeric(result_df[skip_streak_column], errors="coerce").max())
         if reject_bypass_streak_column in result_df.columns:
             metrics[f"max_{sensor_name}_reject_bypass_streak"] = float(
                 pd.to_numeric(result_df[reject_bypass_streak_column], errors="coerce").max()
@@ -527,8 +533,20 @@ def compute_metrics(
             metrics[f"max_{sensor_name}_adaptive_streak"] = float(pd.to_numeric(result_df[adaptive_streak_column], errors="coerce").max())
         if outage_column in result_df.columns:
             metrics[f"max_{sensor_name}_outage_s"] = float(pd.to_numeric(result_df[outage_column], errors="coerce").max())
+        if available_outage_column in result_df.columns:
+            available_outage_values = pd.to_numeric(result_df[available_outage_column], errors="coerce").replace([np.inf, -np.inf], np.nan)
+            metrics[f"max_{sensor_name}_available_outage_s"] = float(
+                available_outage_values.max()
+            )
     if "auxiliary_outage_s" in result_df.columns:
         metrics["max_auxiliary_outage_s"] = float(pd.to_numeric(result_df["auxiliary_outage_s"], errors="coerce").max())
+    if "auxiliary_available_outage_s" in result_df.columns:
+        auxiliary_available_outage_values = pd.to_numeric(
+            result_df["auxiliary_available_outage_s"], errors="coerce"
+        ).replace([np.inf, -np.inf], np.nan)
+        metrics["max_auxiliary_available_outage_s"] = float(
+            auxiliary_available_outage_values.max()
+        )
     if "gravity_gradient_norm" in result_df.columns:
         metrics["mean_gravity_gradient_norm"] = float(result_df["gravity_gradient_norm"].mean())
         metrics["max_gravity_gradient_norm"] = float(result_df["gravity_gradient_norm"].max())

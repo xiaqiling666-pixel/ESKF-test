@@ -23,7 +23,7 @@ class MeasurementResult:
     recovery_scale: float = 1.0
     mode_scale: float = 1.0
     applied_r_scale: float = 1.0
-    management_mode: str = "skip"
+    management_mode: str = "unavailable"
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,609 @@
+============================================================
+时间：2026-04-28 12:10
+任务：阶段收口检查并修复全量回归中的阈值漂移
+阶段：阶段收口 / 阶段 2 主线检查
+主线模块：quality / state_machine / app pipeline / tests
+
+一、本轮目标
+- 对当前项目做一次整体检查，确认主线代码、全量测试和退化处理口径是否一致。
+- 修掉全量回归里暴露出的 `quality/state_machine` 阈值漂移问题。
+
+二、修改文件
+- 02_src/eskf_stack/analysis/state_machine.py
+- 2026-04-28_工作记录.txt
+
+三、完成内容
+1. 运行全量测试，发现 `test_state_machine_uses_specific_covariance_reason_under_gnss` 和恢复链路场景受最近阈值收口影响。
+2. 对 full GNSS 下的 persistent covariance caution 规则做细分：单一 caution 仍可直接触发退化，`multiple_caution_sigmas` 需结合 quality floor 处理。
+3. 修复因此导致的 `DEGRADED -> RECOVERING -> GNSS_STABLE` 回归场景被长期压在 `GNSS_DEGRADED` 的问题。
+4. 清理本轮检查时产生的临时 `test_output.txt`。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_health_state.HealthStateTests.test_state_machine_uses_specific_covariance_reason_under_gnss
+  python -m unittest discover -s 05_tests
+- 结果：
+  通过
+- 关键输出：
+  test_health_state：1 项通过
+  全量测试：128 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `test_output.txt`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 现在退化处理里“自定义阈值收口”和“全量主线回归”重新对齐，避免了一处典型的规则过硬导致恢复链被压死的问题。
+- 这次全量检查后，当前主线代码、测试和退化语义重新回到一致状态。
+
+七、下一步
+1. 继续沿主线检查还有没有类似“新收口规则在局部测试通过，但会打穿全量回归”的地方。
+2. 再做一轮多源退化场景补强，优先围绕 `baro skip + mag reject/recover` 与 `GNSS recover` 交界。
+3. 阶段 2 再稳一轮后，再切回真实数据验证和正式实验对比。
+============================================================
+时间：2026-04-28 11:52
+任务：把 state_machine 的质量门槛收口到可配置阈值
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：state_machine / app pipeline / health tests
+
+一、本轮目标
+- 修掉 state_machine 中剩余的 75/65/55/45/35 这类硬编码质量门槛。
+- 让自定义质量门槛能在 health/app 两层同步影响模式判断。
+
+二、修改文件
+- 02_src/eskf_stack/analysis/state_machine.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+
+三、完成内容
+1. ModeThresholds 新增 full/partial/short-outage/extended-outage 等质量门槛字段。
+2. determine_mode() 中与 quality_score 相关的退化判断全部改成读取 ModeThresholds，而不是直接写死常数。
+3. 新增 health_state 测试，锁定自定义 `short_outage_aux_instability_quality_floor=60.0` 会让同一场景提前退化。
+4. 新增 app 集成测试，锁定 pipeline 在自定义 quality floor 下也会同步进入 `DEGRADED(reason=auxiliary_sensor_instability)`。
+5. 顺手修正测试场景的时间轴，让“recent + hard unstable”真正落在辅助源不稳定分支，而不是被初始化或 recent 窗口干扰。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_health_state.HealthStateTests.test_state_machine_treats_recovering_auxiliary_as_valid_backup_against_single_source_failure 05_tests.test_health_state.HealthStateTests.test_state_machine_respects_custom_auxiliary_instability_quality_floor 05_tests.test_health_state.HealthStateTests.test_support_summary_respects_custom_gnss_skip_threshold
+  python -m unittest 05_tests.test_app.AppInitializationTests.test_pipeline_keeps_inertial_hold_with_baro_reject_and_mag_recovering 05_tests.test_app.AppInitializationTests.test_pipeline_respects_custom_auxiliary_instability_quality_floor 05_tests.test_app.AppInitializationTests.test_pipeline_marks_gnss_available_without_successful_updates_as_degraded
+- 结果：
+  通过
+- 关键输出：
+  test_health_state：3 项通过
+  test_app：3 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  `_tmp_test_app`、`_tmp_test_metrics` 当前不存在，无需清理
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 现在 mode 判断不再被埋在源码里的固定质量门槛绑死，主线退化行为已经能被统一阈值对象控制。
+- 这让后面继续调退化策略时，不必再同时改测试常数和源码魔数，health/app 两层也更容易同步验证。
+
+七、下一步
+1. 继续查还有没有类似“manager policy 已经决定行为，但 quality/state_machine 还在吃默认值或硬编码”的断口。
+2. 再补一组更贴近真实退化场景的多源 update 测试，优先看 `baro skip + mag reject/recover` 组合。
+3. 等最低完整项目再稳一轮后，再切回真实数据验证和正式实验对比。
+============================================================
+时间：2026-04-28 11:37
+任务：统一 quality 与 state_machine 的 policy 对齐阈值来源
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：app pipeline / quality / state_machine
+
+一、本轮目标
+- 修掉 `state_machine` 已按 measurement policy 推导阈值、但 quality_score 还在吃默认阈值的漂移。
+- 让 skip/reject/adaptive 这类退化语义在评分层和模式层真正共享同一阈值来源。
+
+二、修改文件
+- 02_src/eskf_stack/analysis/quality.py
+- 02_src/eskf_stack/analysis/state_machine.py
+- 02_src/eskf_stack/app.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+
+三、完成内容
+1. compute_quality_score() 新增 `support_summary` 参数，可直接吃外部已按 policy 推导好的支撑语义。
+2. determine_mode() 新增 `support_summary` 参数，允许 app 层把同一份 summary 同时传给评分层和模式层。
+3. app.py 现在先按 `mode_thresholds` 生成 `support_summary`，再把同一份 summary 同时传给 quality_score 和 state_machine。
+4. _mode_thresholds_for_measurements() 新增 `gnss_skip_streak_degraded` 和 `auxiliary_skip_streak_degraded`，让 skip 阈值也和 measurement policy 对齐。
+5. 新增 health_state 测试，锁定 `summarize_measurement_support(..., gnss_skip_streak_degraded=3)` 会改变 `gnss_available_without_successful_updates` 判断。
+6. app 测试改成显式自定义 `recovery_trigger_reject_streak=2`，确保测试测的是 policy 对齐，不是默认值碰巧成立。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_health_state.HealthStateTests.test_support_summary_marks_gnss_available_without_successful_updates 05_tests.test_health_state.HealthStateTests.test_support_summary_respects_custom_gnss_skip_threshold 05_tests.test_health_state.HealthStateTests.test_quality_score_penalizes_gnss_available_without_successful_updates 05_tests.test_health_state.HealthStateTests.test_state_machine_marks_gnss_available_without_successful_updates
+  python -m unittest 05_tests.test_app.AppInitializationTests.test_pipeline_marks_gnss_available_without_successful_updates_as_degraded 05_tests.test_app.AppInitializationTests.test_pipeline_uses_policy_aligned_gnss_rejection_threshold_for_mode_degradation 05_tests.test_app.AppInitializationTests.test_pipeline_keeps_inertial_hold_when_one_aux_source_remains_stable
+- 结果：
+  通过
+- 关键输出：
+  test_health_state：4 项通过
+  test_app：3 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  `_tmp_test_app`、`_tmp_test_metrics` 当前不存在，无需清理
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 现在 quality_score 和 state_machine 不只是共用语义函数，连阈值来源也开始共用 measurement policy。
+- 这让后面改 policy trigger 时，不会再出现“mode 已经变了，quality 还停在旧阈值”的主线漂移。
+
+七、下一步
+1. 继续查还有没有类似“manager policy 已经决定了行为，但 quality/state_machine 还在吃默认值”的断口。
+2. 再补一组更贴近真实退化场景的多源 update 测试，优先看 `baro skip + mag reject/recover` 组合。
+3. 等最低完整项目再稳一轮后，再切回真实数据验证和正式实验对比。
+============================================================
+时间：2026-04-28 11:23
+任务：统一 quality 与 state_machine 的多源支撑语义
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：quality / state_machine / app pipeline
+
+一、本轮目标
+- 不再分别在 quality 和 state_machine 里手写一套支撑状态判断。
+- 把 GNSS available-but-unsuccessful、单个稳定辅助源兜底等语义收成共享判断逻辑。
+
+二、修改文件
+- 02_src/eskf_stack/analysis/quality.py
+- 02_src/eskf_stack/analysis/state_machine.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+
+三、完成内容
+1. quality.py 新增 `MeasurementSupportSummary` 和 `summarize_measurement_support()`。
+2. 统一抽取 `full_gnss_support`、`gnss_available_without_successful_updates`、`stable_auxiliary_support`、`auxiliary_instability_without_backup` 等核心语义。
+3. compute_quality_score() 改为直接使用共享 support summary，不再在评分层重复拼一套独立判断。
+4. state_machine.py 改为基于同一份 support summary 判定模式，减少评分层和模式层口径漂移。
+5. 新增 health_state 测试，直接锁定 support summary 对“单个稳定辅助源备份”和“GNSS available-but-unsuccessful”的摘要结果。
+6. 保留并通过 app 级集成测试，确认共享语义落到 pipeline 后仍然符合当前主线行为。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_health_state.HealthStateTests.test_support_summary_keeps_single_stable_auxiliary_backup 05_tests.test_health_state.HealthStateTests.test_support_summary_marks_gnss_available_without_successful_updates 05_tests.test_health_state.HealthStateTests.test_quality_score_penalizes_gnss_available_without_successful_updates 05_tests.test_health_state.HealthStateTests.test_state_machine_marks_gnss_available_without_successful_updates 05_tests.test_health_state.HealthStateTests.test_state_machine_treats_recovering_auxiliary_as_valid_backup_against_single_source_failure
+  python -m unittest 05_tests.test_app.AppInitializationTests.test_pipeline_marks_gnss_available_without_successful_updates_as_degraded 05_tests.test_app.AppInitializationTests.test_pipeline_keeps_inertial_hold_with_baro_reject_and_mag_recovering 05_tests.test_app.AppInitializationTests.test_pipeline_keeps_inertial_hold_when_one_aux_source_remains_stable
+- 结果：
+  通过
+- 关键输出：
+  test_health_state：5 项通过
+  test_app：3 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  `_tmp_test_app`、`_tmp_test_metrics` 当前不存在，无需清理
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 现在 quality 和 state_machine 在多源支撑语义上共用同一套判断，不会再出现一边认为“还有辅助源备份”，另一边却按“无支撑”重罚的漂移。
+- 这让后面继续补退化场景时，只需要收一套主线语义，不用两层反复对齐。
+
+七、下一步
+1. 继续查还有没有类似“观测管理语义已存在，但 quality/state_machine 仍未充分利用”的断口。
+2. 再补一组更贴近真实退化场景的多源 update 测试，优先看 `baro skip + mag reject/recover` 组合。
+3. 等最低完整项目再稳一轮后，再切回真实数据验证和正式实验对比。
+============================================================
+时间：2026-04-28 11:08
+任务：把 GNSS available-but-unsuccessful 语义接入 quality 和状态机
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：quality / state_machine / app pipeline
+
+一、本轮目标
+- 继续沿主线检查“观测管理语义已存在，但 quality/state_machine 还没真正利用”的断口。
+- 让 GNSS 有观测但连续没形成有效更新时，不再被当成普通 `gnss_outage`。
+
+二、修改文件
+- 02_src/eskf_stack/analysis/quality.py
+- 02_src/eskf_stack/analysis/state_machine.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+
+三、完成内容
+1. quality.py 新增对 `gnss_skip_streak` 的质量分惩罚，显式区分“GNSS 无数据”和“GNSS 有数据但没形成成功更新”。
+2. state_machine.py 新增 `gnss_skip_streak_degraded` 阈值。
+3. 当 GNSS 最近仍有 available 观测、但连续 skip 达阈值时，状态机现在会返回 `DEGRADED(reason=gnss_available_without_successful_updates)`。
+4. health_state 测试补了质量分和状态机两层回归，锁定这条 GNSS 新语义。
+5. app 集成测试补了 `GNSS skip + baro update` 场景，锁定 pipeline 输出中的 mode target、management_mode、skip streak 和 quality_score 变化。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_health_state.HealthStateTests.test_quality_score_penalizes_gnss_available_without_successful_updates 05_tests.test_health_state.HealthStateTests.test_state_machine_marks_gnss_available_without_successful_updates 05_tests.test_health_state.HealthStateTests.test_state_machine_distinguishes_available_but_unsuccessful_auxiliary_support
+  python -m unittest 05_tests.test_app.AppInitializationTests.test_pipeline_marks_gnss_available_without_successful_updates_as_degraded 05_tests.test_app.AppInitializationTests.test_pipeline_distinguishes_available_but_unsuccessful_auxiliary_support 05_tests.test_app.AppInitializationTests.test_pipeline_keeps_inertial_hold_when_one_aux_source_remains_stable
+- 结果：
+  通过
+- 关键输出：
+  test_health_state：3 项通过
+  test_app：3 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  `_tmp_test_app`、`_tmp_test_metrics` 当前不存在，无需清理
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 现在系统能明确区分“GNSS 真中断”和“GNSS 还在出数据，但连续没有成功更新”。
+- 这让 MeasurementManager、quality、state_machine、app 输出四层语义更一致，后续查 GNSS 异常更直接。
+
+七、下一步
+1. 继续查还有没有类似“观测管理语义已存在，但 quality/state_machine 仍未充分利用”的断口。
+2. 再补一组更贴近真实退化场景的多源 update 测试，优先看 `baro skip + mag reject/recover` 组合。
+3. 等最低完整项目再稳一轮后，再切回真实数据验证和正式实验对比。
+============================================================
+时间：2026-04-28 10:48
+任务：让 quality_score 与稳定辅助源备份语义对齐
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：quality / state_machine / app pipeline
+
+一、本轮目标
+- 验证并收口上一轮“单个稳定辅助源应保留支撑能力”的逻辑。
+- 避免 quality_score 仍按旧口径过度惩罚 `baro reject + mag recover` 这类有备份的场景。
+
+二、修改文件
+- 02_src/eskf_stack/analysis/quality.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+
+三、完成内容
+1. quality.py 中把辅助源惩罚拆成 hard issue 和 soft issue，并引入 `stable_auxiliary_support`。
+2. 只要 `baro` 或 `mag` 中至少一个仍在稳定成功更新，quality_score 就不再按“完全失去辅助支撑”处理。
+3. 仍保留对单源 reject / bypass / skip / adaptive 的惩罚，但在有稳定备份时降低惩罚强度。
+4. health_state 测试改为验证“有备份时分数高于无备份”，不再依赖不稳的绝对阈值。
+5. app 集成测试补了 `baro reject + mag recover` 与“无备份”对照，锁定 pipeline 层质量分数和模式判断都更合理。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_health_state.HealthStateTests.test_quality_score_does_not_penalize_missing_auxiliary_when_full_gnss_is_recent 05_tests.test_health_state.HealthStateTests.test_quality_score_preserves_auxiliary_backup_when_other_aux_source_degrades 05_tests.test_health_state.HealthStateTests.test_state_machine_treats_recovering_auxiliary_as_valid_backup_against_single_source_failure
+  python -m unittest 05_tests.test_app.AppInitializationTests.test_pipeline_keeps_inertial_hold_with_baro_reject_and_mag_recovering 05_tests.test_app.AppInitializationTests.test_pipeline_keeps_inertial_hold_when_one_aux_source_remains_stable 05_tests.test_app.AppInitializationTests.test_pipeline_distinguishes_available_but_unsuccessful_auxiliary_support
+- 结果：
+  通过
+- 关键输出：
+  test_health_state：3 项通过
+  test_app：3 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  `_tmp_test_app`、`_tmp_test_metrics` 当前不存在，无需清理
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 现在系统在 GNSS 中断下能更真实地区分“辅助源全部失效”和“仍有一个辅助源稳定兜底”。
+- 这让 quality_score、state_machine 和 app pipeline 的多源退化语义更一致，不再只在 mode 层修正、评分层却还停留在旧口径。
+
+七、下一步
+1. 继续查还有没有类似“观测管理语义已存在，但 quality/state_machine 仍未充分利用”的断口。
+2. 再补一组更贴近真实退化场景的多源 update 测试，优先看 `baro skip + mag reject/recover` 组合。
+3. 等最低完整项目再稳一轮后，再切回真实数据验证和正式实验对比。
+============================================================
+时间：2026-04-28 10:59
+任务：保留单个稳定辅助源的有效支撑，避免辅助源判定过于保守
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：state_machine / 多源互补退化判定
+
+一、本轮目标
+- 继续沿主线收口多源退化处理。
+- 解决“一个辅助源异常时，另一个辅助源明明还稳定工作，却被一起判成辅助源失稳”的问题。
+
+二、修改文件
+- 02_src/eskf_stack/analysis/state_machine.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+
+三、完成内容
+1. state_machine 把辅助源异常拆成硬失稳和软失稳：
+   - `reject / bypass / skip` 作为硬失稳；
+   - `adaptive / recover` 作为软失稳。
+2. 新增“稳定辅助支撑”逻辑：只要 baro 或 mag 中至少一个仍在稳定成功更新，就保留辅助源支撑资格。
+3. 这样在 GNSS outage 下，如果一个辅助源 reject/skip，但另一个辅助源仍在 recover/update，就不会被过早打入 DEGRADED。
+4. 更新 health 测试口径，锁定“单个 adaptive 辅助源”在 partial GNSS 下保持 `GNSS_AVAILABLE`。
+5. 新增 app 集成测试，锁定 `baro reject + mag recover` 时仍进入 `INERTIAL_HOLD`，体现多源互补而不是取最坏单源。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_health_state.HealthStateTests.test_state_machine_keeps_partial_gnss_available_with_single_adaptive_auxiliary_support 05_tests.test_health_state.HealthStateTests.test_state_machine_keeps_auxiliary_backup_when_one_aux_source_remains_stable 05_tests.test_health_state.HealthStateTests.test_state_machine_treats_recovering_auxiliary_as_valid_backup_against_single_source_failure
+  python -m unittest 05_tests.test_app.AppInitializationTests.test_pipeline_keeps_inertial_hold_when_one_aux_source_remains_stable 05_tests.test_app.AppInitializationTests.test_pipeline_keeps_inertial_hold_with_baro_reject_and_mag_recovering 05_tests.test_app.AppInitializationTests.test_pipeline_distinguishes_available_but_unsuccessful_auxiliary_support
+- 结果：
+  通过
+- 关键输出：
+  test_health_state：3 项通过
+  test_app：3 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 多源退化判定开始真正体现“互补”而不是“取最坏单源”。
+- 这让 GNSS outage 下的 `INERTIAL_HOLD / DEGRADED` 切换更贴近真实融合系统行为。
+
+七、下一步
+1. 继续查还有没有类似“多源被最大值粗暴合并，掩盖互补关系”的断口。
+2. 再补一组更贴近真实退化场景的多源 update 测试，优先看 baro skip + mag reject / recover 的组合。
+3. 等最低完整项目再稳一轮后，再切回真实数据验证和正式实验对比。
+============================================================
+时间：2026-04-28 10:32
+任务：避免单个辅助源异常过度拖累多源退化判定
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：state_machine / 多源退化处理
+
+一、本轮目标
+- 继续沿主线收口 quality/state_machine 的多源退化逻辑。
+- 解决“一个辅助源异常时，另一个辅助源仍稳定更新却也被一起判成辅助源失稳”的问题。
+
+二、修改文件
+- 02_src/eskf_stack/analysis/state_machine.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+
+三、完成内容
+1. state_machine 不再只用 baro/mag 的最大 streak 判断辅助源失稳。
+2. 新增“稳定辅助支撑”逻辑：只要 baro 或 mag 中至少一个仍在稳定成功更新，就不因为另一个单源异常直接退化。
+3. 继续保留“辅助源有观测但连续未成功更新”的退化路径，用于区分无辅助支撑和失败辅助支撑。
+4. 新增 health 层测试，锁定“单个辅助源异常 + 另一个辅助源稳定”时仍保持 INERTIAL_HOLD。
+5. 新增 app 集成测试，锁定 GNSS outage + baro skip + mag 正常时，pipeline 不会被错误打入 DEGRADED。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_health_state.HealthStateTests.test_state_machine_marks_auxiliary_instability_on_repeated_adaptive_scaling 05_tests.test_health_state.HealthStateTests.test_state_machine_keeps_auxiliary_backup_when_one_aux_source_remains_stable 05_tests.test_health_state.HealthStateTests.test_state_machine_distinguishes_available_but_unsuccessful_auxiliary_support
+  python -m unittest 05_tests.test_app.AppInitializationTests.test_pipeline_distinguishes_available_but_unsuccessful_auxiliary_support 05_tests.test_app.AppInitializationTests.test_pipeline_keeps_inertial_hold_when_one_aux_source_remains_stable 05_tests.test_app.AppInitializationTests.test_pipeline_enters_inertial_hold_on_short_gnss_outage_with_aux_support
+- 结果：
+  通过
+- 关键输出：
+  test_health_state：3 项通过
+  test_app：3 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 多源退化判定更符合“辅助源互补”本意了，不会因为单个辅助源抖动就过度退化。
+- 这让 GNSS 中断场景下的 INERTIAL_HOLD / DEGRADED 切换更贴近真实系统行为。
+
+七、下一步
+1. 继续查还有没有类似“多个传感器被最大值粗暴合并，掩盖真实互补关系”的断口。
+2. 再补一组更贴近真实退化场景的多源 update 测试，优先看 baro reject + mag recover 这类交界。
+3. 等最低完整项目再稳一轮后，再切回真实数据验证和正式实验对比。
+============================================================
+时间：2026-04-28 10:22
+任务：把辅助源“有观测但未形成有效更新”的语义接回退化主线
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：quality / state_machine / app pipeline / metrics
+
+一、本轮目标
+- 继续沿主线检查 manager 层已有语义是否真正进入 quality 和 mode 判定。
+- 区分“辅助源缺失”和“辅助源有观测但连续 skip”，避免 GNSS 中断时两者被混成同一种退化。
+
+二、修改文件
+- 02_src/eskf_stack/analysis/quality.py
+- 02_src/eskf_stack/analysis/state_machine.py
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+
+三、完成内容
+1. SensorFreshnessTracker 新增 `last_available_time` 和 `skip_streak`，正式区分“最近成功更新”和“最近有观测可用”。
+2. SensorStatus 新增 `recent_available_*`、`*_skip_streak`、`*_available_outage_s`、`auxiliary_available_outage_s`。
+3. quality score 现在会对“辅助源有观测但连续 skip”的情况扣分，不再只把它当成普通 outage。
+4. state_machine 新增 `auxiliary_available_without_successful_updates` 路径，GNSS 中断时能区分“无辅助源”和“辅助源在但撑不住”。
+5. app.py 逐帧输出新增 `recent_available_*`、`*_skip_streak`、`*_available_outage_s`。
+6. evaluator.py 新增 `max_*_skip_streak` 和 `max_*_available_outage_s`，并把它们归入 `measurement_management`。
+7. 补齐 health/app/metrics 测试，锁定这条新退化语义链。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_health_state.HealthStateTests.test_tracker_records_auxiliary_availability_without_successful_updates 05_tests.test_health_state.HealthStateTests.test_state_machine_distinguishes_available_but_unsuccessful_auxiliary_support 05_tests.test_health_state.HealthStateTests.test_state_machine_marks_inertial_hold_on_short_outage
+  python -m unittest 05_tests.test_app.AppInitializationTests.test_pipeline_distinguishes_available_but_unsuccessful_auxiliary_support 05_tests.test_app.AppInitializationTests.test_pipeline_enters_inertial_hold_on_short_gnss_outage_with_aux_support 05_tests.test_app.AppInitializationTests.test_pipeline_enters_degraded_on_short_gnss_outage_without_aux_support
+  python -m unittest 05_tests.test_metrics.MetricsTests.test_mode_duration_and_entry_metrics 05_tests.test_metrics.MetricsTests.test_metric_category_marks_reject_bypass_streak_as_measurement_management
+- 结果：
+  通过
+- 关键输出：
+  test_health_state：3 项通过
+  test_app：3 项通过
+  test_metrics：2 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 现在系统能明确区分“辅助源不存在”和“辅助源有数据但连续没形成有效更新”。
+- 这让 GNSS 中断时的 mode 退化理由更贴近真实观测状态，不再只靠是否 recent update 粗分。
+
+七、下一步
+1. 继续查还有没有类似“观测管理语义已经存在，但 quality/state_machine 还没真正利用”的断口。
+2. 再补一组更贴近真实退化场景的多源 update 测试，优先看 GNSS + baro/mag 连续 skip/reject 交界。
+3. 等最低完整项目再稳一轮后，再切回真实数据验证和正式实验对比。
+============================================================
+时间：2026-04-28 10:03
+任务：把 pre-init 可用量测从 skip 收口为 pending_init
+阶段：阶段 1 / 最低完整项目闭环
+主线模块：app pipeline / initialization / metrics
+
+一、本轮目标
+- 继续沿 数据读取 -> 初始化 -> predict -> update -> fusion_output.csv -> metrics 排查主线断口。
+- 解决 pre-init 阶段可用量测被记成 skip，和真正的 manager skip 混在一起的问题。
+
+二、修改文件
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+
+三、完成内容
+1. app.py 的 pre-init 记录现在把“有量测但还没初始化”的 management_mode 明确记为 `pending_init`。
+2. evaluator.py 新增 `*_management_count_pending_init`，让 metrics 能把 pre-init 等待和真正的 manager skip 分开统计。
+3. waiting_gnss 测试补了 unavailable 统计断言，锁定“根本无 GNSS”不会误算成 pending_init。
+4. bootstrap wait 测试补了 pending_init 断言，锁定初始化等待阶段的 GNSS 可用量测会进入 pending_init。
+5. metrics 主测试补了 pending_init 计数和分类断言，锁定新语义不会污染现有 update/reject/recover/skip 统计。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_app.AppInitializationTests.test_pipeline_records_waiting_gnss_rows_before_initialization 05_tests.test_app.AppInitializationTests.test_pipeline_records_bootstrap_wait_diagnostics_before_initialization 05_tests.test_app.AppInitializationTests.test_pipeline_records_recover_management_mode_and_recovery_metrics
+  python -m unittest 05_tests.test_metrics.MetricsTests.test_mode_duration_and_entry_metrics 05_tests.test_metrics.MetricsTests.test_metric_category_marks_reject_bypass_streak_as_measurement_management
+- 结果：
+  通过
+- 关键输出：
+  test_app：3 项通过
+  test_metrics：2 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 现在初始化前、初始化中、初始化后这三段的观测管理语义更干净了。
+- 后续看 metrics 或 fusion_output 时，可以明确区分：
+  - 根本无量测：`unavailable`
+  - 有量测但尚未进入滤波：`pending_init`
+  - 已进入正常 manager 但本帧没形成更新：`skip`
+
+七、下一步
+1. 继续沿主线查还有没有类似“阶段语义混在同一个 management_mode 里”的断口。
+2. 再看 quality/state_machine 是否需要显式利用 pending_init 相关信息，避免把初始化等待误读成普通退化。
+3. 等最低完整项目再稳一轮后，再切回真实数据验证和正式实验对比。
+============================================================
+时间：2026-04-28 09:57
+任务：把 build_update=None 的语义从 unavailable 收口为 skip
+阶段：阶段 1 / 最低完整项目闭环
+主线模块：MeasurementManager / quality tracker / app pipeline
+
+一、本轮目标
+- 继续沿多源 update -> fusion_output.csv -> metrics 查语义断口。
+- 解决 `build_update=None` 仍被当成 unavailable，和 pre-init/逐帧输出语义不一致的问题。
+
+二、修改文件
+- 02_src/eskf_stack/measurements/manager.py
+- 05_tests/test_measurements.py
+- 05_tests/test_health_state.py
+- 05_tests/test_app.py
+
+三、完成内容
+1. MeasurementManager 现在在 `is_available=True` 但 `build_update=None` 时显式返回 `management_mode=skip`，不再混成 unavailable。
+2. 新增 manager 单测，锁定 `available=True + build_update=None` 会返回 skip。
+3. 新增 freshness tracker 测试，锁定 skip 会清掉 reject streak，但不会被当成一次成功更新。
+4. 新增 app 集成测试，锁定 baro=skip 和 mag=unavailable 会在 pipeline 输出和 metrics 中被分开统计。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_measurements.MeasurementManagerTests.test_manager_marks_unavailable_measurement_explicitly 05_tests.test_measurements.MeasurementManagerTests.test_manager_marks_available_but_skipped_measurement_explicitly
+  python -m unittest 05_tests.test_health_state.HealthStateTests.test_tracker_skip_clears_reject_streak_without_counting_as_update
+  python -m unittest 05_tests.test_app.AppInitializationTests.test_pipeline_distinguishes_skip_from_unavailable_management_mode 05_tests.test_app.AppInitializationTests.test_pipeline_records_recover_management_mode_and_recovery_metrics
+  python -m unittest 05_tests.test_metrics.MetricsTests.test_mode_duration_and_entry_metrics 05_tests.test_metrics.MetricsTests.test_metric_category_marks_reject_bypass_streak_as_measurement_management
+- 结果：
+  通过
+- 关键输出：
+  test_measurements：2 项通过
+  test_health_state：1 项通过
+  test_app：2 项通过
+  test_metrics：2 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 现在 `unavailable`、`skip`、`reject`、`recover` 的主线语义更一致了。
+- 这让后续看多源观测管理时，不会再把“根本无量测”和“量测存在但这帧没形成有效更新”混为一谈。
+
+七、下一步
+1. 继续沿主线检查还有没有类似“manager 层有语义，但 quality/state_machine 或 metrics 里还没完全对齐”的断口。
+2. 再看多源 update 交界处是否还缺更贴近真实退化场景的测试。
+3. 等最低完整项目再稳一轮后，再切回真实数据验证和正式实验对比。
+============================================================
+时间：2026-04-28 09:46
+任务：区分 unavailable 和 skip，收口多源观测管理语义
+阶段：阶段 1 / 最低完整项目闭环
+主线模块：MeasurementManager / app pipeline / metrics
+
+一、本轮目标
+- 继续沿 数据读取 -> 初始化 -> predict -> update -> fusion_output.csv -> metrics 排查主线断口。
+- 解决 management_mode 里 `skip` 同时表示“量测不存在”和“量测存在但未使用”的语义混淆。
+
+二、修改文件
+- 02_src/eskf_stack/measurements/base.py
+- 02_src/eskf_stack/measurements/manager.py
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_measurements.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+
+三、完成内容
+1. MeasurementResult 默认 management_mode 从 `skip` 调整为 `unavailable`。
+2. MeasurementManager 在 `model.is_available=False` 或 `build_update=None` 时显式返回 `management_mode=unavailable`。
+3. app.py 的 pre-init 记录现在按真实 availability 区分：
+   - 有量测但未初始化时记为 `skip`
+   - 根本无量测时记为 `unavailable`
+4. 正常运行帧的 management_mode 默认值改成 `unavailable`，避免把缺测和跳过混成一类。
+5. evaluator.py 新增 `*_management_count_unavailable`，让 metrics 能把 unavailable 和 skip 分开统计。
+6. 新增 manager 单测，锁定 unavailable 量测的显式语义。
+7. 扩展 app/metrics 测试，锁定 recover 场景下其他传感器会记为 unavailable，缺测场景也会进入 unavailable 统计。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_measurements.MeasurementManagerTests.test_manager_marks_unavailable_measurement_explicitly 05_tests.test_measurements.MeasurementManagerTests.test_manager_enters_gradual_recovery_after_repeated_rejections
+  python -m unittest 05_tests.test_app.AppInitializationTests.test_pipeline_records_recover_management_mode_and_recovery_metrics 05_tests.test_app.AppInitializationTests.test_pipeline_keeps_missing_baro_and_mag_innovations_as_nan
+  python -m unittest 05_tests.test_metrics.MetricsTests.test_mode_duration_and_entry_metrics 05_tests.test_metrics.MetricsTests.test_metric_category_marks_reject_bypass_streak_as_measurement_management
+- 结果：
+  通过
+- 关键输出：
+  test_measurements：2 项通过
+  test_app：2 项通过
+  test_metrics：2 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 现在 pipeline 和 metrics 能明确区分“没有量测”和“量测存在但被跳过”，多源观测管理语义更干净。
+- 这让后续看 GNSS/baro/mag 的 skipped、recover、reject 和 unavailable 不会再混在一起，更利于主线验收和退化排查。
+
+七、下一步
+1. 继续沿主线检查多源 update 到 metrics 还有没有类似“语义混淆但统计混在一起”的断口。
+2. 再检查 quality/state_machine 是否还把 unavailable 和真正 skip 的情况混在一起使用。
+3. 等最低完整项目再稳一轮后，再切回真实数据验证和正式实验对比。
+============================================================

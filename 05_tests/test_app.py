@@ -24,8 +24,10 @@ from eskf_stack.app import _assess_initialization_status, _bootstrap_initialize_
 from eskf_stack.config import load_config
 from eskf_stack.core import OfflineESKF
 from eskf_stack.measurements.base import MeasurementPolicy, MeasurementResult
+from eskf_stack.measurements.barometer import BarometerMeasurement
 from eskf_stack.measurements.gnss_position import GnssPositionMeasurement
 from eskf_stack.measurements.gnss_velocity import GnssVelocityMeasurement
+from eskf_stack.analysis.state_machine import ModeThresholds
 
 
 def _minimal_metrics_frame() -> pd.DataFrame:
@@ -205,12 +207,15 @@ class AppInitializationTests(unittest.TestCase):
         self.assertTrue((result_df["initialization_reason"] == "no_gnss_position").all())
         self.assertTrue(result_df["initialization_pending"].all())
         self.assertTrue(result_df["est_x"].isna().all())
+        self.assertTrue((result_df["gnss_pos_management_mode"] == "unavailable").all())
+        self.assertTrue((result_df["gnss_vel_management_mode"] == "unavailable").all())
         self.assertIn("result_df", captured)
         self.assertEqual(captured["initialization_summary"]["initialization_phase"], "WAITING_GNSS")
 
         metrics = compute_metrics(result_df)
         self.assertEqual(metrics["initialization_row_count"], 2.0)
         self.assertEqual(metrics["initialization_pending_row_count"], 2.0)
+        self.assertEqual(metrics["gnss_pos_management_count_unavailable"], 2.0)
         self.assertAlmostEqual(metrics["initialization_phase_duration_WAITING_GNSS_s"], 2.0, places=6)
 
     def test_pipeline_records_bootstrap_wait_diagnostics_before_initialization(self) -> None:
@@ -258,12 +263,17 @@ class AppInitializationTests(unittest.TestCase):
         self.assertEqual(len(result_df), 2)
         self.assertEqual(result_df.loc[0, "initialization_phase"], "WAITING_BOOTSTRAP_MOTION")
         self.assertEqual(result_df.loc[0, "initialization_reason"], "awaiting_bootstrap_anchor")
+        self.assertEqual(result_df.loc[0, "gnss_pos_management_mode"], "pending_init")
         self.assertAlmostEqual(float(result_df.loc[0, "bootstrap_anchor_age_s"]), 0.0, places=6)
         self.assertAlmostEqual(float(result_df.loc[0, "bootstrap_anchor_horizontal_displacement_m"]), 0.0, places=6)
         self.assertEqual(result_df.loc[1, "initialization_phase"], "WAITING_BOOTSTRAP_MOTION")
         self.assertEqual(result_df.loc[1, "initialization_reason"], "bootstrap_dt_too_short")
+        self.assertEqual(result_df.loc[1, "gnss_pos_management_mode"], "pending_init")
         self.assertAlmostEqual(float(result_df.loc[1, "bootstrap_anchor_age_s"]), 0.05, places=6)
         self.assertAlmostEqual(float(result_df.loc[1, "bootstrap_anchor_horizontal_displacement_m"]), np.sqrt(0.02), places=6)
+
+        metrics = compute_metrics(result_df)
+        self.assertEqual(metrics["gnss_pos_management_count_pending_init"], 2.0)
 
     def test_pipeline_marks_direct_initialization_transition_row(self) -> None:
         config = load_config(PROJECT_ROOT / "01_data" / "config.json")
@@ -450,8 +460,8 @@ class AppInitializationTests(unittest.TestCase):
         self.assertEqual(len(result_df), 3)
         self.assertTrue(bool(result_df.loc[1, "gnss_pos_rejected"]))
         self.assertTrue(bool(result_df.loc[2, "gnss_pos_rejected"]))
-        self.assertEqual(result_df.loc[2, "mode"], "GNSS_DEGRADED")
-        self.assertEqual(result_df.loc[2, "mode_reason"], "partial_gnss_with_rejections")
+        self.assertEqual(result_df.loc[2, "mode_target"], "GNSS_DEGRADED")
+        self.assertEqual(result_df.loc[2, "mode_target_reason"], "partial_gnss_with_rejections")
 
     def test_initialization_status_reports_ready_direct_init(self) -> None:
         config = load_config(PROJECT_ROOT / "01_data" / "config.json")
@@ -809,7 +819,7 @@ class AppInitializationTests(unittest.TestCase):
                         applied_r_scale=2.0,
                         management_mode="reject",
                     )
-                return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             captured: dict[str, pd.DataFrame] = {}
@@ -910,7 +920,7 @@ class AppInitializationTests(unittest.TestCase):
                         applied_r_scale=1.0,
                         management_mode="update",
                     )
-                return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             captured: dict[str, object] = {}
@@ -1000,7 +1010,7 @@ class AppInitializationTests(unittest.TestCase):
                         applied_r_scale=2.0,
                         management_mode="update",
                     )
-                return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
 
         result_df = self._run_pipeline_with_manager(
             config,
@@ -1025,7 +1035,7 @@ class AppInitializationTests(unittest.TestCase):
         config = load_config(PROJECT_ROOT / "01_data" / "config.json")
         sensor_df = pd.DataFrame(
             {
-                "time": [0.0, 0.5, 1.0, 1.5],
+                "time": [0.0, 0.4, 0.7, 0.9],
                 "ax": [0.0, 0.0, 0.0, 0.0],
                 "ay": [0.0, 0.0, 0.0, 0.0],
                 "az": [-9.81, -9.81, -9.81, -9.81],
@@ -1086,7 +1096,7 @@ class AppInitializationTests(unittest.TestCase):
                         applied_r_scale=1.0,
                         management_mode="update",
                     )
-                return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
 
         result_df = self._run_pipeline_with_manager(
             config,
@@ -1181,7 +1191,7 @@ class AppInitializationTests(unittest.TestCase):
                         applied_r_scale=1.0,
                         management_mode="update",
                     )
-                return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
 
         result_df = self._run_pipeline_with_manager(
             config,
@@ -1260,7 +1270,7 @@ class AppInitializationTests(unittest.TestCase):
                         applied_r_scale=1.0,
                         management_mode="update",
                     )
-                return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
 
         result_df = self._run_pipeline_with_manager(
             config,
@@ -1279,6 +1289,669 @@ class AppInitializationTests(unittest.TestCase):
         self.assertGreaterEqual(metrics["mode_duration_DEGRADED_s"], 0.5)
         self.assertEqual(metrics["mode_entry_count_DEGRADED"], 1.0)
         self.assertTrue(metrics["max_auxiliary_outage_s"] > 1e6)
+
+    def test_pipeline_distinguishes_available_but_unsuccessful_auxiliary_support(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0, 0.5, 1.0, 1.5],
+                "ax": [0.0, 0.0, 0.0, 0.0],
+                "ay": [0.0, 0.0, 0.0, 0.0],
+                "az": [-9.81, -9.81, -9.81, -9.81],
+                "gx": [0.0, 0.0, 0.0, 0.0],
+                "gy": [0.0, 0.0, 0.0, 0.0],
+                "gz": [0.0, 0.0, 0.0, 0.0],
+                "gnss_x": [10.0, np.nan, np.nan, np.nan],
+                "gnss_y": [20.0, np.nan, np.nan, np.nan],
+                "gnss_z": [5.0, np.nan, np.nan, np.nan],
+                "gnss_vx": [1.0, np.nan, np.nan, np.nan],
+                "gnss_vy": [0.0, np.nan, np.nan, np.nan],
+                "gnss_vz": [0.0, np.nan, np.nan, np.nan],
+                "baro_h": [np.nan, 12.1, 12.2, 12.3],
+                "mag_yaw": [np.nan, np.nan, np.nan, np.nan],
+                "truth_x": [np.nan, np.nan, np.nan, np.nan],
+                "truth_y": [np.nan, np.nan, np.nan, np.nan],
+                "truth_z": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vx": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vy": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vz": [np.nan, np.nan, np.nan, np.nan],
+                "truth_yaw": [np.nan, np.nan, np.nan, np.nan],
+            }
+        )
+
+        class FakeMeasurementManager:
+            def process(self, filter_engine, model, frame, current_mode=None):
+                if model.name == "gnss_pos" and frame.gnss_pos is not None:
+                    return MeasurementResult(
+                        name="gnss_pos",
+                        available=True,
+                        used=True,
+                        innovation_value=0.2,
+                        nis=0.8,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                if model.name == "gnss_vel" and frame.gnss_vel is not None:
+                    return MeasurementResult(
+                        name="gnss_vel",
+                        available=True,
+                        used=True,
+                        innovation_value=0.1,
+                        nis=0.4,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                if model.name == "baro" and frame.baro_h is not None:
+                    return MeasurementResult(
+                        name="baro",
+                        available=True,
+                        used=False,
+                        rejected=False,
+                        management_mode="skip",
+                    )
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
+
+        result_df = self._run_pipeline_with_manager(
+            config,
+            sensor_df,
+            FakeMeasurementManager(),
+            "available_but_unsuccessful_aux",
+        )
+
+        self.assertEqual(result_df.loc[2, "mode_target"], "DEGRADED")
+        self.assertEqual(result_df.loc[2, "mode_target_reason"], "auxiliary_available_without_successful_updates")
+        self.assertTrue(bool(result_df.loc[2, "recent_available_baro"]))
+        self.assertFalse(bool(result_df.loc[2, "recent_baro"]))
+        self.assertEqual(int(result_df.loc[2, "baro_skip_streak"]), 2)
+
+        metrics = compute_metrics(result_df)
+        self.assertEqual(metrics["baro_management_count_skip"], 3.0)
+        self.assertEqual(metrics["max_baro_skip_streak"], 3.0)
+        self.assertAlmostEqual(metrics["max_auxiliary_available_outage_s"], 0.0, places=6)
+
+    def test_pipeline_keeps_inertial_hold_when_one_aux_source_remains_stable(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0, 0.5, 1.0, 1.5],
+                "ax": [0.0, 0.0, 0.0, 0.0],
+                "ay": [0.0, 0.0, 0.0, 0.0],
+                "az": [-9.81, -9.81, -9.81, -9.81],
+                "gx": [0.0, 0.0, 0.0, 0.0],
+                "gy": [0.0, 0.0, 0.0, 0.0],
+                "gz": [0.0, 0.0, 0.0, 0.0],
+                "gnss_x": [10.0, np.nan, np.nan, np.nan],
+                "gnss_y": [20.0, np.nan, np.nan, np.nan],
+                "gnss_z": [5.0, np.nan, np.nan, np.nan],
+                "gnss_vx": [1.0, np.nan, np.nan, np.nan],
+                "gnss_vy": [0.0, np.nan, np.nan, np.nan],
+                "gnss_vz": [0.0, np.nan, np.nan, np.nan],
+                "baro_h": [np.nan, 12.1, 12.2, 12.3],
+                "mag_yaw": [0.1, 0.2, 0.3, 0.4],
+                "truth_x": [np.nan, np.nan, np.nan, np.nan],
+                "truth_y": [np.nan, np.nan, np.nan, np.nan],
+                "truth_z": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vx": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vy": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vz": [np.nan, np.nan, np.nan, np.nan],
+                "truth_yaw": [np.nan, np.nan, np.nan, np.nan],
+            }
+        )
+
+        class FakeMeasurementManager:
+            def process(self, filter_engine, model, frame, current_mode=None):
+                if model.name == "gnss_pos" and frame.gnss_pos is not None:
+                    return MeasurementResult(
+                        name="gnss_pos",
+                        available=True,
+                        used=True,
+                        innovation_value=0.2,
+                        nis=0.8,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                if model.name == "gnss_vel" and frame.gnss_vel is not None:
+                    return MeasurementResult(
+                        name="gnss_vel",
+                        available=True,
+                        used=True,
+                        innovation_value=0.1,
+                        nis=0.4,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                if model.name == "baro" and frame.baro_h is not None:
+                    return MeasurementResult(
+                        name="baro",
+                        available=True,
+                        used=False,
+                        rejected=False,
+                        management_mode="skip",
+                    )
+                if model.name == "mag" and frame.mag_yaw is not None:
+                    if frame.time <= 0.5:
+                        return MeasurementResult(
+                            name="mag",
+                            available=True,
+                            used=True,
+                            innovation_value=1.0,
+                            nis=0.5,
+                            rejected=False,
+                            adaptation_scale=1.0,
+                            recovery_scale=1.0,
+                            mode_scale=1.0,
+                            applied_r_scale=1.0,
+                            management_mode="update",
+                        )
+                    return MeasurementResult(
+                        name="mag",
+                        available=True,
+                        used=True,
+                        innovation_value=2.0,
+                        nis=0.8,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
+
+        result_df = self._run_pipeline_with_manager(
+            config,
+            sensor_df,
+            FakeMeasurementManager(),
+            "stable_auxiliary_backup",
+        )
+
+        self.assertEqual(result_df.loc[2, "mode_target"], "INERTIAL_HOLD")
+        self.assertEqual(result_df.loc[2, "mode_target_reason"], "short_gnss_outage")
+        self.assertEqual(result_df.loc[3, "mode"], "INERTIAL_HOLD")
+        self.assertTrue(bool(result_df.loc[2, "recent_baro"]) is False)
+        self.assertTrue(bool(result_df.loc[2, "recent_mag"]))
+        self.assertEqual(int(result_df.loc[2, "baro_skip_streak"]), 2)
+
+        metrics = compute_metrics(result_df)
+        self.assertEqual(metrics["baro_management_count_skip"], 3.0)
+        self.assertEqual(metrics["mag_management_count_update"], 4.0)
+        self.assertGreaterEqual(metrics["mode_duration_INERTIAL_HOLD_s"], 0.5)
+
+    def test_pipeline_marks_gnss_available_without_successful_updates_as_degraded(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+
+        class FastSkipGnssPositionMeasurement(GnssPositionMeasurement):
+            def policy(self, filter_engine) -> MeasurementPolicy:
+                base_policy = super().policy(filter_engine)
+                return MeasurementPolicy(
+                    adapt_threshold=base_policy.adapt_threshold,
+                    reject_threshold=base_policy.reject_threshold,
+                    recovery_trigger_reject_streak=2,
+                    recovery_window=base_policy.recovery_window,
+                    recovery_max_scale=base_policy.recovery_max_scale,
+                )
+
+        class FastSkipGnssVelocityMeasurement(GnssVelocityMeasurement):
+            def policy(self, filter_engine) -> MeasurementPolicy:
+                base_policy = super().policy(filter_engine)
+                return MeasurementPolicy(
+                    adapt_threshold=base_policy.adapt_threshold,
+                    reject_threshold=base_policy.reject_threshold,
+                    recovery_trigger_reject_streak=2,
+                    recovery_window=base_policy.recovery_window,
+                    recovery_max_scale=base_policy.recovery_max_scale,
+                )
+
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0, 0.5, 1.0, 1.5],
+                "ax": [0.0, 0.0, 0.0, 0.0],
+                "ay": [0.0, 0.0, 0.0, 0.0],
+                "az": [-9.81, -9.81, -9.81, -9.81],
+                "gx": [0.0, 0.0, 0.0, 0.0],
+                "gy": [0.0, 0.0, 0.0, 0.0],
+                "gz": [0.0, 0.0, 0.0, 0.0],
+                "gnss_x": [10.0, 10.5, 11.0, 11.5],
+                "gnss_y": [20.0, 20.0, 20.0, 20.0],
+                "gnss_z": [5.0, 5.0, 5.0, 5.0],
+                "gnss_vx": [1.0, 1.0, 1.0, 1.0],
+                "gnss_vy": [0.0, 0.0, 0.0, 0.0],
+                "gnss_vz": [0.0, 0.0, 0.0, 0.0],
+                "baro_h": [np.nan, 12.1, 12.2, 12.3],
+                "mag_yaw": [np.nan, np.nan, np.nan, np.nan],
+                "truth_x": [np.nan, np.nan, np.nan, np.nan],
+                "truth_y": [np.nan, np.nan, np.nan, np.nan],
+                "truth_z": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vx": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vy": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vz": [np.nan, np.nan, np.nan, np.nan],
+                "truth_yaw": [np.nan, np.nan, np.nan, np.nan],
+            }
+        )
+
+        class FakeMeasurementManager:
+            def process(self, filter_engine, model, frame, current_mode=None):
+                if model.name == "gnss_pos" and frame.gnss_pos is not None:
+                    if frame.time <= 0.5:
+                        return MeasurementResult(
+                            name="gnss_pos",
+                            available=True,
+                            used=True,
+                            innovation_value=0.2,
+                            nis=0.8,
+                            rejected=False,
+                            adaptation_scale=1.0,
+                            recovery_scale=1.0,
+                            mode_scale=1.0,
+                            applied_r_scale=1.0,
+                            management_mode="update",
+                        )
+                    return MeasurementResult(
+                        name="gnss_pos",
+                        available=True,
+                        used=False,
+                        rejected=False,
+                        management_mode="skip",
+                    )
+                if model.name == "gnss_vel" and frame.gnss_vel is not None:
+                    if frame.time <= 0.5:
+                        return MeasurementResult(
+                            name="gnss_vel",
+                            available=True,
+                            used=True,
+                            innovation_value=0.1,
+                            nis=0.4,
+                            rejected=False,
+                            adaptation_scale=1.0,
+                            recovery_scale=1.0,
+                            mode_scale=1.0,
+                            applied_r_scale=1.0,
+                            management_mode="update",
+                        )
+                    return MeasurementResult(
+                        name="gnss_vel",
+                        available=True,
+                        used=False,
+                        rejected=False,
+                        management_mode="skip",
+                    )
+                if model.name == "baro" and frame.baro_h is not None:
+                    return MeasurementResult(
+                        name="baro",
+                        available=True,
+                        used=True,
+                        innovation_value=0.2,
+                        nis=0.6,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
+
+        with patch(
+            "eskf_stack.app._build_measurements",
+            return_value=[FastSkipGnssPositionMeasurement(), FastSkipGnssVelocityMeasurement(), BarometerMeasurement()],
+        ):
+            result_df = self._run_pipeline_with_manager(
+                config,
+                sensor_df,
+                FakeMeasurementManager(),
+                "gnss_available_without_successful_updates",
+            )
+
+        self.assertEqual(result_df.loc[3, "mode_target"], "DEGRADED")
+        self.assertEqual(result_df.loc[3, "mode_target_reason"], "gnss_available_without_successful_updates")
+        self.assertEqual(result_df.loc[3, "gnss_pos_management_mode"], "skip")
+        self.assertEqual(result_df.loc[3, "gnss_vel_management_mode"], "skip")
+        self.assertTrue(bool(result_df.loc[3, "recent_available_gnss_pos"]))
+        self.assertFalse(bool(result_df.loc[3, "recent_gnss_pos"]))
+        self.assertEqual(int(result_df.loc[3, "gnss_pos_skip_streak"]), 2)
+        self.assertEqual(int(result_df.loc[3, "gnss_vel_skip_streak"]), 2)
+
+        metrics = compute_metrics(result_df)
+        self.assertEqual(metrics["gnss_pos_management_count_skip"], 2.0)
+        self.assertEqual(metrics["gnss_vel_management_count_skip"], 2.0)
+        self.assertLess(float(result_df.loc[3, "quality_score"]), float(result_df.loc[1, "quality_score"]))
+
+    def test_pipeline_keeps_inertial_hold_with_baro_reject_and_mag_recovering(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0, 0.5, 1.0, 1.5],
+                "ax": [0.0, 0.0, 0.0, 0.0],
+                "ay": [0.0, 0.0, 0.0, 0.0],
+                "az": [-9.81, -9.81, -9.81, -9.81],
+                "gx": [0.0, 0.0, 0.0, 0.0],
+                "gy": [0.0, 0.0, 0.0, 0.0],
+                "gz": [0.0, 0.0, 0.0, 0.0],
+                "gnss_x": [10.0, np.nan, np.nan, np.nan],
+                "gnss_y": [20.0, np.nan, np.nan, np.nan],
+                "gnss_z": [5.0, np.nan, np.nan, np.nan],
+                "gnss_vx": [1.0, np.nan, np.nan, np.nan],
+                "gnss_vy": [0.0, np.nan, np.nan, np.nan],
+                "gnss_vz": [0.0, np.nan, np.nan, np.nan],
+                "baro_h": [np.nan, 12.1, 12.2, 12.3],
+                "mag_yaw": [0.1, 0.2, 0.3, 0.4],
+                "truth_x": [np.nan, np.nan, np.nan, np.nan],
+                "truth_y": [np.nan, np.nan, np.nan, np.nan],
+                "truth_z": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vx": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vy": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vz": [np.nan, np.nan, np.nan, np.nan],
+                "truth_yaw": [np.nan, np.nan, np.nan, np.nan],
+            }
+        )
+
+        class FakeMeasurementManager:
+            def process(self, filter_engine, model, frame, current_mode=None):
+                if model.name == "gnss_pos" and frame.gnss_pos is not None:
+                    return MeasurementResult(
+                        name="gnss_pos",
+                        available=True,
+                        used=True,
+                        innovation_value=0.2,
+                        nis=0.8,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                if model.name == "gnss_vel" and frame.gnss_vel is not None:
+                    return MeasurementResult(
+                        name="gnss_vel",
+                        available=True,
+                        used=True,
+                        innovation_value=0.1,
+                        nis=0.4,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                if model.name == "baro" and frame.baro_h is not None:
+                    return MeasurementResult(
+                        name="baro",
+                        available=True,
+                        used=False,
+                        rejected=True,
+                        management_mode="reject",
+                    )
+                if model.name == "mag" and frame.mag_yaw is not None:
+                    return MeasurementResult(
+                        name="mag",
+                        available=True,
+                        used=True,
+                        innovation_value=2.0,
+                        nis=0.8,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=2.0,
+                        mode_scale=1.0,
+                        applied_r_scale=2.0,
+                        management_mode="recover",
+                    )
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
+
+        result_df = self._run_pipeline_with_manager(
+            config,
+            sensor_df,
+            FakeMeasurementManager(),
+            "baro_reject_mag_recover",
+        )
+
+        self.assertEqual(result_df.loc[2, "mode_target"], "INERTIAL_HOLD")
+        self.assertEqual(result_df.loc[2, "mode_target_reason"], "short_gnss_outage")
+        self.assertEqual(result_df.loc[3, "mode"], "INERTIAL_HOLD")
+        self.assertEqual(result_df.loc[2, "baro_management_mode"], "reject")
+        self.assertEqual(result_df.loc[2, "mag_management_mode"], "recover")
+        self.assertEqual(int(result_df.loc[2, "baro_reject_streak"]), 2)
+        self.assertEqual(int(result_df.loc[2, "mag_adaptive_streak"]), 3)
+
+        metrics = compute_metrics(result_df)
+        self.assertEqual(metrics["baro_management_count_reject"], 3.0)
+        self.assertEqual(metrics["mag_management_count_recover"], 4.0)
+        self.assertGreaterEqual(metrics["mode_duration_INERTIAL_HOLD_s"], 0.5)
+
+        class NoBackupMeasurementManager:
+            def process(self, filter_engine, model, frame, current_mode=None):
+                if model.name == "gnss_pos" and frame.gnss_pos is not None:
+                    return MeasurementResult(
+                        name="gnss_pos",
+                        available=True,
+                        used=True,
+                        innovation_value=0.2,
+                        nis=0.8,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                if model.name == "gnss_vel" and frame.gnss_vel is not None:
+                    return MeasurementResult(
+                        name="gnss_vel",
+                        available=True,
+                        used=True,
+                        innovation_value=0.1,
+                        nis=0.4,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                if model.name == "baro" and frame.baro_h is not None:
+                    return MeasurementResult(
+                        name="baro",
+                        available=True,
+                        used=False,
+                        rejected=True,
+                        management_mode="reject",
+                    )
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
+
+        no_backup_df = self._run_pipeline_with_manager(
+            config,
+            sensor_df,
+            NoBackupMeasurementManager(),
+            "baro_reject_no_mag_backup",
+        )
+
+        self.assertGreater(float(result_df.loc[2, "quality_score"]), float(no_backup_df.loc[2, "quality_score"]))
+
+    def test_pipeline_keeps_inertial_hold_with_baro_skip_and_mag_recovering(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0, 0.5, 1.0, 1.5],
+                "ax": [0.0, 0.0, 0.0, 0.0],
+                "ay": [0.0, 0.0, 0.0, 0.0],
+                "az": [-9.81, -9.81, -9.81, -9.81],
+                "gx": [0.0, 0.0, 0.0, 0.0],
+                "gy": [0.0, 0.0, 0.0, 0.0],
+                "gz": [0.0, 0.0, 0.0, 0.0],
+                "gnss_x": [10.0, np.nan, np.nan, np.nan],
+                "gnss_y": [20.0, np.nan, np.nan, np.nan],
+                "gnss_z": [5.0, np.nan, np.nan, np.nan],
+                "gnss_vx": [1.0, np.nan, np.nan, np.nan],
+                "gnss_vy": [0.0, np.nan, np.nan, np.nan],
+                "gnss_vz": [0.0, np.nan, np.nan, np.nan],
+                "baro_h": [np.nan, 12.1, 12.2, 12.3],
+                "mag_yaw": [0.1, 0.2, 0.3, 0.4],
+                "truth_x": [np.nan, np.nan, np.nan, np.nan],
+                "truth_y": [np.nan, np.nan, np.nan, np.nan],
+                "truth_z": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vx": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vy": [np.nan, np.nan, np.nan, np.nan],
+                "truth_vz": [np.nan, np.nan, np.nan, np.nan],
+                "truth_yaw": [np.nan, np.nan, np.nan, np.nan],
+            }
+        )
+
+        class FakeMeasurementManager:
+            def process(self, filter_engine, model, frame, current_mode=None):
+                if model.name == "gnss_pos" and frame.gnss_pos is not None:
+                    return MeasurementResult(
+                        name="gnss_pos", available=True, used=True, management_mode="update"
+                    )
+                if model.name == "gnss_vel" and frame.gnss_vel is not None:
+                    return MeasurementResult(
+                        name="gnss_vel", available=True, used=True, management_mode="update"
+                    )
+                if model.name == "baro" and frame.baro_h is not None:
+                    return MeasurementResult(
+                        name="baro", available=True, used=False, rejected=False, management_mode="skip"
+                    )
+                if model.name == "mag" and frame.mag_yaw is not None:
+                    # Alternating reject and recover to simulate instability but staying within limits
+                    if frame.time == 0.5:
+                        return MeasurementResult(
+                            name="mag", available=True, used=False, rejected=True, management_mode="reject"
+                        )
+                    return MeasurementResult(
+                        name="mag", available=True, used=True, innovation_value=1.5, management_mode="recover", applied_r_scale=1.5
+                    )
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
+
+        result_df = self._run_pipeline_with_manager(
+            config,
+            sensor_df,
+            FakeMeasurementManager(),
+            "baro_skip_mag_recover",
+        )
+
+        # Frame 2 (time=1.0): GNSS Outage (1.0s), Baro skip (streak 2), Mag updated/recovered (streak 0)
+        # Should stay in INERTIAL_HOLD because Mag is a stable backup
+        self.assertEqual(result_df.loc[2, "mode_target"], "INERTIAL_HOLD")
+        self.assertEqual(result_df.loc[2, "baro_management_mode"], "skip")
+        self.assertEqual(result_df.loc[2, "mag_management_mode"], "recover")
+        self.assertEqual(int(result_df.loc[2, "baro_skip_streak"]), 2)
+        self.assertEqual(int(result_df.loc[2, "mag_reject_streak"]), 0)
+
+        # Frame 3 (time=1.5): Baro skip streak 3, but Mag still update/recover
+        self.assertEqual(result_df.loc[3, "mode"], "INERTIAL_HOLD")
+        self.assertEqual(int(result_df.loc[3, "baro_skip_streak"]), 3)
+
+    def test_pipeline_respects_custom_auxiliary_instability_quality_floor(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0, 0.4, 0.7, 0.9, 1.1],
+                "ax": [0.0, 0.0, 0.0, 0.0, 0.0],
+                "ay": [0.0, 0.0, 0.0, 0.0, 0.0],
+                "az": [-9.81, -9.81, -9.81, -9.81, -9.81],
+                "gx": [0.0, 0.0, 0.0, 0.0, 0.0],
+                "gy": [0.0, 0.0, 0.0, 0.0, 0.0],
+                "gz": [0.0, 0.0, 0.0, 0.0, 0.0],
+                "gnss_x": [10.0, np.nan, np.nan, np.nan, np.nan],
+                "gnss_y": [20.0, np.nan, np.nan, np.nan, np.nan],
+                "gnss_z": [5.0, np.nan, np.nan, np.nan, np.nan],
+                "gnss_vx": [1.0, np.nan, np.nan, np.nan, np.nan],
+                "gnss_vy": [0.0, np.nan, np.nan, np.nan, np.nan],
+                "gnss_vz": [0.0, np.nan, np.nan, np.nan, np.nan],
+                "baro_h": [np.nan, np.nan, np.nan, np.nan, np.nan],
+                "mag_yaw": [0.1, 0.2, 0.3, 0.4, 0.5],
+                "truth_x": [np.nan, np.nan, np.nan, np.nan, np.nan],
+                "truth_y": [np.nan, np.nan, np.nan, np.nan, np.nan],
+                "truth_z": [np.nan, np.nan, np.nan, np.nan, np.nan],
+                "truth_vx": [np.nan, np.nan, np.nan, np.nan, np.nan],
+                "truth_vy": [np.nan, np.nan, np.nan, np.nan, np.nan],
+                "truth_vz": [np.nan, np.nan, np.nan, np.nan, np.nan],
+                "truth_yaw": [np.nan, np.nan, np.nan, np.nan, np.nan],
+            }
+        )
+
+        class FakeMeasurementManager:
+            def process(self, filter_engine, model, frame, current_mode=None):
+                if model.name == "gnss_pos" and frame.gnss_pos is not None:
+                    return MeasurementResult(
+                        name="gnss_pos",
+                        available=True,
+                        used=True,
+                        innovation_value=0.2,
+                        nis=0.8,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                if model.name == "gnss_vel" and frame.gnss_vel is not None:
+                    return MeasurementResult(
+                        name="gnss_vel",
+                        available=True,
+                        used=True,
+                        innovation_value=0.1,
+                        nis=0.4,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                if model.name == "mag" and frame.mag_yaw is not None:
+                    if frame.time <= 0.7:
+                        return MeasurementResult(
+                            name="mag",
+                            available=True,
+                            used=True,
+                            innovation_value=1.0,
+                            nis=0.5,
+                            rejected=False,
+                            adaptation_scale=1.0,
+                            recovery_scale=1.0,
+                            mode_scale=1.0,
+                            applied_r_scale=1.0,
+                            management_mode="update",
+                        )
+                    return MeasurementResult(
+                        name="mag",
+                        available=True,
+                        used=False,
+                        rejected=True,
+                        management_mode="reject",
+                    )
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
+
+        custom_thresholds = replace(ModeThresholds(), short_outage_aux_instability_quality_floor=60.0)
+
+        with patch("eskf_stack.app._mode_thresholds_for_measurements", return_value=custom_thresholds):
+            result_df = self._run_pipeline_with_manager(
+                config,
+                sensor_df,
+                FakeMeasurementManager(),
+                "custom_aux_instability_quality_floor",
+            )
+
+        self.assertEqual(result_df.loc[4, "mode_target"], "DEGRADED")
+        self.assertEqual(result_df.loc[4, "mode_target_reason"], "auxiliary_sensor_instability")
 
     def test_pipeline_transitions_from_degraded_to_recovering_and_back_to_stable(self) -> None:
         config = load_config(PROJECT_ROOT / "01_data" / "config.json")
@@ -1339,7 +2012,7 @@ class AppInitializationTests(unittest.TestCase):
                         applied_r_scale=1.0,
                         management_mode="update",
                     )
-                return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
 
         result_df = self._run_pipeline_with_manager(
             config,
@@ -1420,7 +2093,7 @@ class AppInitializationTests(unittest.TestCase):
                         applied_r_scale=1.0,
                         management_mode="reject",
                     )
-                return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             captured: dict[str, object] = {}
@@ -1484,6 +2157,95 @@ class AppInitializationTests(unittest.TestCase):
         self.assertAlmostEqual(metrics["mean_baro_nis"], 1.6, places=6)
         self.assertAlmostEqual(metrics["mean_mag_nis"], 9.0, places=6)
 
+    def test_pipeline_distinguishes_skip_from_unavailable_management_mode(self) -> None:
+        config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0],
+                "ax": [0.0],
+                "ay": [0.0],
+                "az": [-9.81],
+                "gx": [0.0],
+                "gy": [0.0],
+                "gz": [0.0],
+                "gnss_x": [10.0],
+                "gnss_y": [20.0],
+                "gnss_z": [5.0],
+                "gnss_vx": [1.0],
+                "gnss_vy": [0.0],
+                "gnss_vz": [0.0],
+                "baro_h": [12.3],
+                "mag_yaw": [np.nan],
+                "truth_x": [np.nan],
+                "truth_y": [np.nan],
+                "truth_z": [np.nan],
+                "truth_vx": [np.nan],
+                "truth_vy": [np.nan],
+                "truth_vz": [np.nan],
+                "truth_yaw": [np.nan],
+            }
+        )
+
+        class FakeMeasurementManager:
+            def process(self, filter_engine, model, frame, current_mode=None):
+                if model.name == "gnss_pos":
+                    return MeasurementResult(
+                        name="gnss_pos",
+                        available=True,
+                        used=True,
+                        innovation_value=0.2,
+                        nis=0.8,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                if model.name == "gnss_vel":
+                    return MeasurementResult(
+                        name="gnss_vel",
+                        available=True,
+                        used=True,
+                        innovation_value=0.1,
+                        nis=0.4,
+                        rejected=False,
+                        adaptation_scale=1.0,
+                        recovery_scale=1.0,
+                        mode_scale=1.0,
+                        applied_r_scale=1.0,
+                        management_mode="update",
+                    )
+                if model.name == "baro":
+                    return MeasurementResult(
+                        name="baro",
+                        available=True,
+                        used=False,
+                        rejected=False,
+                        management_mode="skip",
+                    )
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
+
+        result_df = self._run_pipeline_with_manager(
+            config,
+            sensor_df,
+            FakeMeasurementManager(),
+            "skip_vs_unavailable_management_mode",
+        )
+
+        self.assertEqual(result_df.loc[0, "baro_management_mode"], "skip")
+        self.assertEqual(result_df.loc[0, "mag_management_mode"], "unavailable")
+        self.assertTrue(bool(result_df.loc[0, "available_baro"]))
+        self.assertFalse(bool(result_df.loc[0, "available_mag"]))
+
+        metrics = compute_metrics(result_df)
+        self.assertEqual(metrics["baro_management_count_skip"], 1.0)
+        self.assertEqual(metrics["baro_management_count_unavailable"], 0.0)
+        self.assertEqual(metrics["mag_management_count_skip"], 0.0)
+        self.assertEqual(metrics["mag_management_count_unavailable"], 1.0)
+        self.assertEqual(metrics["baro_available_measurements"], 1.0)
+        self.assertEqual(metrics["mag_available_measurements"], 0.0)
+
     def test_pipeline_records_recover_management_mode_and_recovery_metrics(self) -> None:
         config = load_config(PROJECT_ROOT / "01_data" / "config.json")
         sensor_df = pd.DataFrame(
@@ -1543,7 +2305,7 @@ class AppInitializationTests(unittest.TestCase):
                         applied_r_scale=1.0,
                         management_mode="update",
                     )
-                return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
 
         result_df = self._run_pipeline_with_manager(
             config,
@@ -1554,12 +2316,16 @@ class AppInitializationTests(unittest.TestCase):
 
         self.assertEqual(result_df.loc[0, "gnss_pos_management_mode"], "recover")
         self.assertAlmostEqual(float(result_df.loc[0, "gnss_pos_recovery_scale"]), 2.5, places=6)
+        self.assertEqual(result_df.loc[0, "baro_management_mode"], "unavailable")
+        self.assertEqual(result_df.loc[0, "mag_management_mode"], "unavailable")
 
         metrics = compute_metrics(result_df)
         self.assertEqual(metrics["gnss_pos_management_count_recover"], 1.0)
         self.assertEqual(metrics["gnss_pos_management_count_update"], 0.0)
         self.assertEqual(metrics["gnss_pos_recovery_scaled_updates"], 1.0)
         self.assertAlmostEqual(metrics["max_gnss_pos_recovery_scale"], 2.5, places=6)
+        self.assertEqual(metrics["baro_management_count_unavailable"], 1.0)
+        self.assertEqual(metrics["mag_management_count_unavailable"], 1.0)
 
     def test_pipeline_keeps_missing_baro_and_mag_innovations_as_nan(self) -> None:
         config = load_config(PROJECT_ROOT / "01_data" / "config.json")
@@ -1592,7 +2358,7 @@ class AppInitializationTests(unittest.TestCase):
 
         class FakeMeasurementManager:
             def process(self, filter_engine, model, frame, current_mode=None):
-                return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+                return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             with (
@@ -1611,9 +2377,13 @@ class AppInitializationTests(unittest.TestCase):
         self.assertEqual(len(result_df), 1)
         self.assertTrue(np.isnan(result_df.loc[0, "baro_innovation_abs"]))
         self.assertTrue(np.isnan(result_df.loc[0, "yaw_innovation_abs_deg"]))
+        self.assertEqual(result_df.loc[0, "baro_management_mode"], "unavailable")
+        self.assertEqual(result_df.loc[0, "mag_management_mode"], "unavailable")
         metrics = compute_metrics(result_df)
         self.assertEqual(metrics["baro_available_measurements"], 0.0)
         self.assertEqual(metrics["mag_available_measurements"], 0.0)
+        self.assertEqual(metrics["baro_management_count_unavailable"], 1.0)
+        self.assertEqual(metrics["mag_management_count_unavailable"], 1.0)
         self.assertNotIn("mean_baro_innovation", metrics)
         self.assertNotIn("mean_mag_innovation", metrics)
 

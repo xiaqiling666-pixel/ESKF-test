@@ -15,6 +15,7 @@ from eskf_stack.analysis.quality import (
     SensorFreshnessTracker,
     classify_covariance_health,
     compute_quality_score,
+    summarize_measurement_support,
 )
 from eskf_stack.analysis.state_machine import ModeDecision, ModeStateTracker, ModeThresholds, determine_mode
 
@@ -63,6 +64,77 @@ class HealthStateTests(unittest.TestCase):
         self.assertAlmostEqual(snapshot.baro_outage_s, 0.9, places=9)
         self.assertTrue(snapshot.mag_outage_s > 1e6)
         self.assertAlmostEqual(snapshot.auxiliary_outage_s, 0.9, places=9)
+
+    def test_tracker_skip_clears_reject_streak_without_counting_as_update(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_pos", 0.2, available=True, used=False, rejected=True)
+        tracker.note_result("gnss_pos", 0.3, available=True, used=False, rejected=False, management_mode="skip")
+
+        snapshot = tracker.snapshot(0.61)
+
+        self.assertEqual(snapshot.gnss_pos_reject_streak, 0)
+        self.assertFalse(snapshot.recent_gnss_pos)
+        self.assertTrue(snapshot.recent_available_gnss_pos)
+        self.assertEqual(snapshot.gnss_pos_skip_streak, 1)
+        self.assertAlmostEqual(snapshot.gnss_pos_outage_s, 0.61, places=9)
+        self.assertAlmostEqual(snapshot.gnss_pos_available_outage_s, 0.31, places=9)
+
+    def test_tracker_records_auxiliary_availability_without_successful_updates(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("baro", 1.0, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("baro", 1.1, available=True, used=False, rejected=False, management_mode="skip")
+
+        snapshot = tracker.snapshot(1.2)
+
+        self.assertFalse(snapshot.recent_baro)
+        self.assertTrue(snapshot.recent_available_baro)
+        self.assertEqual(snapshot.baro_skip_streak, 2)
+        self.assertTrue(snapshot.baro_outage_s > 1.0)
+        self.assertAlmostEqual(snapshot.baro_available_outage_s, 0.1, places=9)
+        self.assertAlmostEqual(snapshot.auxiliary_available_outage_s, 0.1, places=9)
+
+    def test_support_summary_keeps_single_stable_auxiliary_backup(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("baro", 1.0, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("baro", 1.1, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("mag", 1.0, available=True, used=True, rejected=False, management_mode="recover")
+        tracker.note_result("mag", 1.1, available=True, used=True, rejected=False, management_mode="recover")
+        tracker.note_result("mag", 1.2, available=True, used=True, rejected=False, management_mode="recover")
+        support = summarize_measurement_support(tracker.snapshot(1.3))
+
+        self.assertTrue(support.stable_auxiliary_support)
+        self.assertFalse(support.auxiliary_instability_without_backup)
+        self.assertTrue(support.baro_hard_unstable)
+        self.assertFalse(support.mag_hard_unstable)
+
+    def test_support_summary_marks_gnss_available_without_successful_updates(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_pos", 1.0, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("gnss_vel", 1.0, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("gnss_pos", 1.1, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("gnss_vel", 1.1, available=True, used=False, rejected=False, management_mode="skip")
+        support = summarize_measurement_support(tracker.snapshot(1.2))
+
+        self.assertTrue(support.recent_any_gnss_available)
+        self.assertFalse(support.recent_any_gnss)
+        self.assertTrue(support.gnss_available_without_successful_updates)
+
+    def test_support_summary_respects_custom_gnss_skip_threshold(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_pos", 1.0, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("gnss_vel", 1.0, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("gnss_pos", 1.1, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("gnss_vel", 1.1, available=True, used=False, rejected=False, management_mode="skip")
+        support = summarize_measurement_support(tracker.snapshot(1.2), gnss_skip_streak_degraded=3)
+
+        self.assertFalse(support.gnss_available_without_successful_updates)
 
     def test_state_machine_marks_gnss_degraded_on_rejections(self) -> None:
         tracker = SensorFreshnessTracker()
@@ -157,6 +229,82 @@ class HealthStateTests(unittest.TestCase):
 
         self.assertGreaterEqual(score, 75.0)
 
+    def test_quality_score_preserves_auxiliary_backup_when_other_aux_source_degrades(self) -> None:
+        tracker_with_backup = SensorFreshnessTracker()
+        tracker_with_backup.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker_with_backup.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        tracker_with_backup.note_result("baro", 1.0, available=True, used=False, rejected=True)
+        tracker_with_backup.note_result("baro", 1.1, available=True, used=False, rejected=True)
+        tracker_with_backup.note_result("mag", 1.0, available=True, used=True, rejected=False, management_mode="recover")
+        tracker_with_backup.note_result("mag", 1.1, available=True, used=True, rejected=False, management_mode="recover")
+        tracker_with_backup.note_result("mag", 1.2, available=True, used=True, rejected=False, management_mode="recover")
+        snapshot_with_backup = tracker_with_backup.snapshot(1.3)
+
+        tracker_without_backup = SensorFreshnessTracker()
+        tracker_without_backup.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker_without_backup.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        tracker_without_backup.note_result("baro", 1.0, available=True, used=False, rejected=True)
+        tracker_without_backup.note_result("baro", 1.1, available=True, used=False, rejected=True)
+        snapshot_without_backup = tracker_without_backup.snapshot(1.3)
+
+        score_with_backup = compute_quality_score(
+            snapshot_with_backup,
+            pos_innovation_norm=0.2,
+            vel_innovation_norm=0.1,
+            baro_innovation_abs=0.0,
+            yaw_innovation_abs_deg=1.0,
+            pos_sigma_norm_m=0.8,
+            vel_sigma_norm_mps=0.3,
+            att_sigma_norm_deg=3.0,
+        )
+        score_without_backup = compute_quality_score(
+            snapshot_without_backup,
+            pos_innovation_norm=0.2,
+            vel_innovation_norm=0.1,
+            baro_innovation_abs=0.0,
+            yaw_innovation_abs_deg=1.0,
+            pos_sigma_norm_m=0.8,
+            vel_sigma_norm_mps=0.3,
+            att_sigma_norm_deg=3.0,
+        )
+
+        self.assertGreater(score_with_backup, score_without_backup)
+
+    def test_quality_score_penalizes_gnss_available_without_successful_updates(self) -> None:
+        tracker_with_skips = SensorFreshnessTracker()
+        tracker_with_skips.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker_with_skips.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        tracker_with_skips.note_result("gnss_pos", 1.0, available=True, used=False, rejected=False, management_mode="skip")
+        tracker_with_skips.note_result("gnss_vel", 1.0, available=True, used=False, rejected=False, management_mode="skip")
+        tracker_with_skips.note_result("gnss_pos", 1.1, available=True, used=False, rejected=False, management_mode="skip")
+        tracker_with_skips.note_result("gnss_vel", 1.1, available=True, used=False, rejected=False, management_mode="skip")
+        score_with_skips = compute_quality_score(
+            tracker_with_skips.snapshot(1.2),
+            pos_innovation_norm=0.2,
+            vel_innovation_norm=0.1,
+            baro_innovation_abs=0.0,
+            yaw_innovation_abs_deg=1.0,
+            pos_sigma_norm_m=0.8,
+            vel_sigma_norm_mps=0.3,
+            att_sigma_norm_deg=3.0,
+        )
+
+        tracker_without_skips = SensorFreshnessTracker()
+        tracker_without_skips.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker_without_skips.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        score_without_skips = compute_quality_score(
+            tracker_without_skips.snapshot(1.2),
+            pos_innovation_norm=0.2,
+            vel_innovation_norm=0.1,
+            baro_innovation_abs=0.0,
+            yaw_innovation_abs_deg=1.0,
+            pos_sigma_norm_m=0.8,
+            vel_sigma_norm_mps=0.3,
+            att_sigma_norm_deg=3.0,
+        )
+
+        self.assertLess(score_with_skips, score_without_skips)
+
     def test_state_machine_marks_inertial_hold_on_short_outage(self) -> None:
         tracker = SensorFreshnessTracker()
         tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
@@ -188,6 +336,43 @@ class HealthStateTests(unittest.TestCase):
         self.assertEqual(decision.mode, "DEGRADED")
         self.assertEqual(decision.reason, "gnss_outage_without_aux_support")
 
+    def test_state_machine_distinguishes_available_but_unsuccessful_auxiliary_support(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("baro", 1.0, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("baro", 1.1, available=True, used=False, rejected=False, management_mode="skip")
+        snapshot = tracker.snapshot(1.2)
+
+        decision = determine_mode(
+            snapshot,
+            quality_score=55.0,
+            covariance_health=self._covariance_health(1.2, 0.8, 0.3, 3.0),
+        )
+
+        self.assertEqual(decision.mode, "DEGRADED")
+        self.assertEqual(decision.reason, "auxiliary_available_without_successful_updates")
+
+    def test_state_machine_marks_gnss_available_without_successful_updates(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("baro", 1.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_pos", 1.0, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("gnss_vel", 1.0, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("gnss_pos", 1.1, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("gnss_vel", 1.1, available=True, used=False, rejected=False, management_mode="skip")
+        snapshot = tracker.snapshot(1.2)
+
+        decision = determine_mode(
+            snapshot,
+            quality_score=55.0,
+            covariance_health=self._covariance_health(1.2, 0.8, 0.3, 3.0),
+        )
+
+        self.assertEqual(decision.mode, "DEGRADED")
+        self.assertEqual(decision.reason, "gnss_available_without_successful_updates")
+
     def test_state_machine_degrades_partial_gnss_without_auxiliary_support(self) -> None:
         tracker = SensorFreshnessTracker()
         tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
@@ -203,7 +388,7 @@ class HealthStateTests(unittest.TestCase):
         self.assertEqual(decision.mode, "GNSS_DEGRADED")
         self.assertEqual(decision.reason, "partial_gnss_without_aux_support")
 
-    def test_state_machine_marks_auxiliary_instability_on_repeated_adaptive_scaling(self) -> None:
+    def test_state_machine_keeps_partial_gnss_available_with_single_adaptive_auxiliary_support(self) -> None:
         tracker = SensorFreshnessTracker()
         tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
         tracker.note_result("baro", 0.0, available=True, used=True, rejected=False, adaptation_scale=1.2)
@@ -217,7 +402,65 @@ class HealthStateTests(unittest.TestCase):
             covariance_health=self._covariance_health(0.3, 0.5, 0.2, 2.0),
         )
 
-        self.assertEqual(decision.mode, "GNSS_DEGRADED")
+        self.assertEqual(decision.mode, "GNSS_AVAILABLE")
+        self.assertEqual(decision.reason, "partial_or_recovering_gnss")
+
+    def test_state_machine_keeps_auxiliary_backup_when_one_aux_source_remains_stable(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("baro", 1.0, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("baro", 1.1, available=True, used=False, rejected=False, management_mode="skip")
+        tracker.note_result("mag", 1.0, available=True, used=True, rejected=False)
+        tracker.note_result("mag", 1.1, available=True, used=True, rejected=False)
+        snapshot = tracker.snapshot(1.2)
+
+        decision = determine_mode(
+            snapshot,
+            quality_score=50.0,
+            covariance_health=self._covariance_health(1.2, 0.8, 0.3, 3.0),
+        )
+
+        self.assertEqual(decision.mode, "INERTIAL_HOLD")
+        self.assertEqual(decision.reason, "short_gnss_outage")
+
+    def test_state_machine_treats_recovering_auxiliary_as_valid_backup_against_single_source_failure(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("baro", 1.0, available=True, used=False, rejected=True)
+        tracker.note_result("baro", 1.1, available=True, used=False, rejected=True)
+        tracker.note_result("mag", 1.0, available=True, used=True, rejected=False, management_mode="recover")
+        tracker.note_result("mag", 1.1, available=True, used=True, rejected=False, management_mode="recover")
+        tracker.note_result("mag", 1.2, available=True, used=True, rejected=False, management_mode="recover")
+        snapshot = tracker.snapshot(1.3)
+
+        decision = determine_mode(
+            snapshot,
+            quality_score=50.0,
+            covariance_health=self._covariance_health(1.3, 0.8, 0.3, 3.0),
+        )
+
+        self.assertEqual(decision.mode, "INERTIAL_HOLD")
+        self.assertEqual(decision.reason, "short_gnss_outage")
+
+    def test_state_machine_respects_custom_auxiliary_instability_quality_floor(self) -> None:
+        tracker = SensorFreshnessTracker()
+        tracker.note_result("gnss_pos", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("gnss_vel", 0.0, available=True, used=True, rejected=False)
+        tracker.note_result("mag", 0.7, available=True, used=True, rejected=False)
+        tracker.note_result("mag", 1.0, available=True, used=False, rejected=True)
+        tracker.note_result("mag", 1.1, available=True, used=False, rejected=True)
+        snapshot = tracker.snapshot(1.2)
+
+        decision = determine_mode(
+            snapshot,
+            quality_score=50.0,
+            covariance_health=self._covariance_health(1.2, 0.8, 0.3, 3.0),
+            thresholds=ModeThresholds(short_outage_aux_instability_quality_floor=60.0),
+        )
+
+        self.assertEqual(decision.mode, "DEGRADED")
         self.assertEqual(decision.reason, "auxiliary_sensor_instability")
 
     def test_state_machine_uses_specific_covariance_reason_under_gnss(self) -> None:

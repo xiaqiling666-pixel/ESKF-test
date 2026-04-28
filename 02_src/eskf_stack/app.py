@@ -21,6 +21,7 @@ from .analysis.quality import (
     SensorFreshnessTracker,
     classify_covariance_health,
     compute_quality_score,
+    summarize_measurement_support,
 )
 from .analysis.state_machine import ModeStateTracker, ModeThresholds, determine_mode
 from .config import load_config, project_path
@@ -69,9 +70,11 @@ def _mode_thresholds_for_measurements(filter_engine, measurement_models) -> Mode
         gnss_reject_streak_degraded=gnss_threshold,
         gnss_reject_bypass_streak_degraded=max(2, gnss_threshold - 1),
         gnss_adaptive_streak_degraded=gnss_threshold,
+        gnss_skip_streak_degraded=gnss_threshold,
         auxiliary_reject_streak_degraded=auxiliary_threshold,
         auxiliary_reject_bypass_streak_degraded=max(2, auxiliary_threshold),
         auxiliary_adaptive_streak_degraded=auxiliary_threshold,
+        auxiliary_skip_streak_degraded=auxiliary_threshold,
     )
 
 
@@ -131,6 +134,10 @@ def _preinit_record(frame, truth_frame, initialization_status, bootstrap_anchor_
         frame,
         bootstrap_anchor_frame,
     )
+    gnss_pos_available = frame.gnss_pos is not None
+    gnss_vel_available = frame.gnss_vel is not None
+    baro_available = frame.baro_h is not None
+    mag_available = frame.mag_yaw is not None
 
     record: dict[str, Any] = {
         "time": frame.time,
@@ -148,10 +155,10 @@ def _preinit_record(frame, truth_frame, initialization_status, bootstrap_anchor_
         "est_roll": np.nan,
         "est_pitch": np.nan,
         "est_yaw": np.nan,
-        "available_gnss_pos": frame.gnss_pos is not None,
-        "available_gnss_vel": frame.gnss_vel is not None,
-        "available_baro": frame.baro_h is not None,
-        "available_mag": frame.mag_yaw is not None,
+        "available_gnss_pos": gnss_pos_available,
+        "available_gnss_vel": gnss_vel_available,
+        "available_baro": baro_available,
+        "available_mag": mag_available,
         "used_gnss_pos": False,
         "used_gnss_vel": False,
         "used_baro": False,
@@ -164,10 +171,10 @@ def _preinit_record(frame, truth_frame, initialization_status, bootstrap_anchor_
         "gnss_vel_reject_bypassed": False,
         "baro_reject_bypassed": False,
         "mag_reject_bypassed": False,
-        "gnss_pos_management_mode": "skip",
-        "gnss_vel_management_mode": "skip",
-        "baro_management_mode": "skip",
-        "mag_management_mode": "skip",
+        "gnss_pos_management_mode": "pending_init" if gnss_pos_available else "unavailable",
+        "gnss_vel_management_mode": "pending_init" if gnss_vel_available else "unavailable",
+        "baro_management_mode": "pending_init" if baro_available else "unavailable",
+        "mag_management_mode": "pending_init" if mag_available else "unavailable",
         "gnss_pos_innovation_norm": np.nan,
         "gnss_vel_innovation_norm": np.nan,
         "baro_innovation_abs": np.nan,
@@ -316,7 +323,7 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
         recovery_scales = {"gnss_pos": 1.0, "gnss_vel": 1.0, "baro": 1.0, "mag": 1.0}
         mode_scales = {"gnss_pos": 1.0, "gnss_vel": 1.0, "baro": 1.0, "mag": 1.0}
         applied_r_scales = {"gnss_pos": 1.0, "gnss_vel": 1.0, "baro": 1.0, "mag": 1.0}
-        management_modes = {"gnss_pos": "skip", "gnss_vel": "skip", "baro": "skip", "mag": "skip"}
+        management_modes = {"gnss_pos": "unavailable", "gnss_vel": "unavailable", "baro": "unavailable", "mag": "unavailable"}
         nis_adapt_thresholds = {"gnss_pos": np.nan, "gnss_vel": np.nan, "baro": np.nan, "mag": np.nan}
         nis_reject_thresholds = {"gnss_pos": np.nan, "gnss_vel": np.nan, "baro": np.nan, "mag": np.nan}
         current_mode = None if mode_tracker.current_decision is None else mode_tracker.current_decision.mode
@@ -363,6 +370,14 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
             att_sigma_norm_deg=att_sigma_norm_deg,
         )
         covariance_health = covariance_tracker.step(frame.time, covariance_health)
+        support_summary = summarize_measurement_support(
+            sensor_status,
+            gnss_skip_streak_degraded=mode_thresholds.gnss_skip_streak_degraded,
+            auxiliary_reject_streak_degraded=mode_thresholds.auxiliary_reject_streak_degraded,
+            auxiliary_reject_bypass_streak_degraded=mode_thresholds.auxiliary_reject_bypass_streak_degraded,
+            auxiliary_adaptive_streak_degraded=mode_thresholds.auxiliary_adaptive_streak_degraded,
+            auxiliary_skip_streak_degraded=mode_thresholds.auxiliary_skip_streak_degraded,
+        )
         quality_score = compute_quality_score(
             sensor_status=sensor_status,
             pos_innovation_norm=innovations["gnss_pos"],
@@ -372,12 +387,14 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
             pos_sigma_norm_m=pos_sigma_norm_m,
             vel_sigma_norm_mps=vel_sigma_norm_mps,
             att_sigma_norm_deg=att_sigma_norm_deg,
+            support_summary=support_summary,
         )
         target_mode_decision = determine_mode(
             sensor_status,
             quality_score,
             covariance_health,
             thresholds=mode_thresholds,
+            support_summary=support_summary,
         )
         mode_state = mode_tracker.step(measurement_frame.time, target_mode_decision)
         est_roll, est_pitch, est_yaw = quat_to_euler(filter_engine.state.quaternion)
@@ -434,10 +451,18 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
             "recent_gnss_vel": sensor_status.recent_gnss_vel,
             "recent_baro": sensor_status.recent_baro,
             "recent_mag": sensor_status.recent_mag,
+            "recent_available_gnss_pos": sensor_status.recent_available_gnss_pos,
+            "recent_available_gnss_vel": sensor_status.recent_available_gnss_vel,
+            "recent_available_baro": sensor_status.recent_available_baro,
+            "recent_available_mag": sensor_status.recent_available_mag,
             "gnss_pos_reject_streak": sensor_status.gnss_pos_reject_streak,
             "gnss_vel_reject_streak": sensor_status.gnss_vel_reject_streak,
             "baro_reject_streak": sensor_status.baro_reject_streak,
             "mag_reject_streak": sensor_status.mag_reject_streak,
+            "gnss_pos_skip_streak": sensor_status.gnss_pos_skip_streak,
+            "gnss_vel_skip_streak": sensor_status.gnss_vel_skip_streak,
+            "baro_skip_streak": sensor_status.baro_skip_streak,
+            "mag_skip_streak": sensor_status.mag_skip_streak,
             "gnss_pos_reject_bypass_streak": sensor_status.gnss_pos_reject_bypass_streak,
             "gnss_vel_reject_bypass_streak": sensor_status.gnss_vel_reject_bypass_streak,
             "baro_reject_bypass_streak": sensor_status.baro_reject_bypass_streak,
@@ -452,6 +477,11 @@ def run_pipeline(config_path: str | None = None) -> pd.DataFrame:
             "baro_outage_s": sensor_status.baro_outage_s,
             "mag_outage_s": sensor_status.mag_outage_s,
             "auxiliary_outage_s": sensor_status.auxiliary_outage_s,
+            "gnss_pos_available_outage_s": sensor_status.gnss_pos_available_outage_s,
+            "gnss_vel_available_outage_s": sensor_status.gnss_vel_available_outage_s,
+            "baro_available_outage_s": sensor_status.baro_available_outage_s,
+            "mag_available_outage_s": sensor_status.mag_available_outage_s,
+            "auxiliary_available_outage_s": sensor_status.auxiliary_available_outage_s,
             "gnss_pos_innovation_norm": innovation_outputs["gnss_pos"],
             "gnss_vel_innovation_norm": innovation_outputs["gnss_vel"],
             "baro_innovation_abs": innovation_outputs["baro"],

@@ -52,10 +52,18 @@ class MetricsTests(unittest.TestCase):
                 "used_gnss_vel": [0, 0, 1, 0, 1],
                 "used_baro": [1, 0, 1, 1, 1],
                 "used_mag": [1, 1, 0, 1, 1],
+                "recent_available_gnss_pos": [1, 1, 0, 1, 1],
+                "recent_available_gnss_vel": [0, 1, 1, 1, 1],
+                "recent_available_baro": [1, 1, 1, 1, 1],
+                "recent_available_mag": [1, 0, 1, 1, 1],
                 "gnss_pos_reject_streak": [0, 0, 0, 0, 1],
                 "gnss_vel_reject_streak": [0, 0, 0, 0, 0],
                 "baro_reject_streak": [0, 1, 0, 0, 0],
                 "mag_reject_streak": [0, 0, 1, 0, 0],
+                "gnss_pos_skip_streak": [0, 0, 0, 1, 0],
+                "gnss_vel_skip_streak": [0, 1, 0, 1, 0],
+                "baro_skip_streak": [0, 0, 1, 0, 0],
+                "mag_skip_streak": [0, 0, 0, 0, 0],
                 "gnss_pos_reject_bypass_streak": [0, 1, 2, 0, 0],
                 "gnss_vel_reject_bypass_streak": [0, 0, 0, 0, 1],
                 "baro_reject_bypass_streak": [0, 0, 0, 1, 0],
@@ -69,6 +77,11 @@ class MetricsTests(unittest.TestCase):
                 "baro_outage_s": [0.0, 1.0, 2.0, 0.0, 0.0],
                 "mag_outage_s": [0.0, 1.0, 0.0, 0.0, 0.0],
                 "auxiliary_outage_s": [0.0, 0.0, 0.0, 0.0, 0.0],
+                "gnss_pos_available_outage_s": [0.0, 0.0, 1.0, 0.0, 0.0],
+                "gnss_vel_available_outage_s": [float("inf"), 0.0, 0.0, 0.0, 0.0],
+                "baro_available_outage_s": [0.0, 0.0, 0.0, 0.0, 0.0],
+                "mag_available_outage_s": [0.0, 1.0, 0.0, 0.0, 0.0],
+                "auxiliary_available_outage_s": [0.0, 0.0, 0.0, 0.0, 0.0],
                 "gnss_pos_innovation_norm": [1.0, 2.0, float("nan"), 4.0, 5.0],
                 "gnss_vel_innovation_norm": [float("nan"), 1.5, 2.5, 3.5, 4.5],
                 "baro_innovation_abs": [0.2, 0.4, float("nan"), 0.8, 1.0],
@@ -81,16 +94,16 @@ class MetricsTests(unittest.TestCase):
                 "gnss_vel_adaptation_scale": [1.0, 1.0, 1.0, 1.0, 1.6],
                 "gnss_pos_rejected": [False, False, False, False, True],
                 "gnss_vel_rejected": [False, False, False, False, False],
-                "gnss_pos_management_mode": ["update", "update", "skip", "skip", "reject"],
-                "gnss_vel_management_mode": ["skip", "skip", "recover", "skip", "update"],
+                "gnss_pos_management_mode": ["update", "update", "unavailable", "skip", "reject"],
+                "gnss_vel_management_mode": ["unavailable", "skip", "recover", "skip", "update"],
                 "gnss_pos_recovery_scale": [1.0, 1.0, 1.0, 1.0, 1.0],
                 "gnss_vel_recovery_scale": [1.0, 1.0, 2.0, 1.0, 1.0],
                 "baro_adaptation_scale": [1.0, 2.0, 1.0, 1.4, 1.0],
                 "mag_adaptation_scale": [1.0, 1.2, 2.0, 1.0, 1.0],
                 "baro_rejected": [False, True, False, False, False],
                 "mag_rejected": [False, False, True, False, False],
-                "baro_management_mode": ["update", "reject", "skip", "recover", "update"],
-                "mag_management_mode": ["update", "skip", "reject", "update", "update"],
+                "baro_management_mode": ["update", "reject", "unavailable", "recover", "update"],
+                "mag_management_mode": ["update", "unavailable", "reject", "update", "update"],
                 "baro_recovery_scale": [1.0, 1.0, 1.0, 1.5, 1.0],
                 "mag_recovery_scale": [1.0, 1.0, 1.0, 1.0, 1.0],
                 "gnss_pos_nis": [1.0, 2.0, float("nan"), 4.0, 5.0],
@@ -175,25 +188,33 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["gnss_pos_management_count_update"], 2.0)
         self.assertEqual(metrics["gnss_pos_management_count_reject"], 1.0)
         self.assertEqual(metrics["gnss_pos_management_count_recover"], 0.0)
-        self.assertEqual(metrics["gnss_pos_management_count_skip"], 2.0)
+        self.assertEqual(metrics["gnss_pos_management_count_skip"], 1.0)
+        self.assertEqual(metrics["gnss_pos_management_count_unavailable"], 1.0)
+        self.assertEqual(metrics["gnss_pos_management_count_pending_init"], 0.0)
         self.assertEqual(metrics["max_gnss_pos_reject_streak"], 1.0)
+        self.assertEqual(metrics["max_gnss_pos_skip_streak"], 1.0)
         self.assertEqual(metrics["max_gnss_pos_reject_bypass_streak"], 2.0)
         self.assertEqual(metrics["max_gnss_pos_adaptive_streak"], 2.0)
         self.assertEqual(metrics["gnss_pos_recovery_scaled_updates"], 0.0)
         self.assertEqual(metrics["max_gnss_pos_recovery_scale"], 1.0)
         self.assertAlmostEqual(metrics["max_gnss_pos_outage_s"], 3.0, places=9)
+        self.assertAlmostEqual(metrics["max_gnss_pos_available_outage_s"], 1.0, places=9)
         self.assertEqual(metrics["gnss_vel_available_measurements"], 4.0)
         self.assertEqual(metrics["gnss_vel_updates"], 2.0)
         self.assertEqual(metrics["gnss_vel_management_count_update"], 1.0)
         self.assertEqual(metrics["gnss_vel_management_count_reject"], 0.0)
         self.assertEqual(metrics["gnss_vel_management_count_recover"], 1.0)
-        self.assertEqual(metrics["gnss_vel_management_count_skip"], 3.0)
+        self.assertEqual(metrics["gnss_vel_management_count_skip"], 2.0)
+        self.assertEqual(metrics["gnss_vel_management_count_unavailable"], 1.0)
+        self.assertEqual(metrics["gnss_vel_management_count_pending_init"], 0.0)
         self.assertEqual(metrics["max_gnss_vel_reject_streak"], 0.0)
+        self.assertEqual(metrics["max_gnss_vel_skip_streak"], 1.0)
         self.assertEqual(metrics["max_gnss_vel_reject_bypass_streak"], 1.0)
         self.assertEqual(metrics["max_gnss_vel_adaptive_streak"], 1.0)
         self.assertEqual(metrics["gnss_vel_recovery_scaled_updates"], 1.0)
         self.assertEqual(metrics["max_gnss_vel_recovery_scale"], 2.0)
         self.assertTrue(metrics["max_gnss_vel_outage_s"] > 1e6)
+        self.assertAlmostEqual(metrics["max_gnss_vel_available_outage_s"], 0.0, places=9)
         self.assertEqual(metrics["gnss_vel_mode_scaled_measurements"], 2.0)
         self.assertEqual(metrics["gnss_vel_mode_scaled_updates"], 2.0)
         self.assertEqual(metrics["gnss_vel_mode_scaled_rejections"], 0.0)
@@ -204,26 +225,35 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["baro_management_count_update"], 2.0)
         self.assertEqual(metrics["baro_management_count_reject"], 1.0)
         self.assertEqual(metrics["baro_management_count_recover"], 1.0)
-        self.assertEqual(metrics["baro_management_count_skip"], 1.0)
+        self.assertEqual(metrics["baro_management_count_skip"], 0.0)
+        self.assertEqual(metrics["baro_management_count_unavailable"], 1.0)
+        self.assertEqual(metrics["baro_management_count_pending_init"], 0.0)
         self.assertEqual(metrics["max_baro_reject_streak"], 1.0)
+        self.assertEqual(metrics["max_baro_skip_streak"], 1.0)
         self.assertEqual(metrics["max_baro_reject_bypass_streak"], 1.0)
         self.assertEqual(metrics["max_baro_adaptive_streak"], 2.0)
         self.assertEqual(metrics["baro_recovery_scaled_updates"], 1.0)
         self.assertEqual(metrics["max_baro_recovery_scale"], 1.5)
         self.assertAlmostEqual(metrics["max_baro_outage_s"], 2.0, places=9)
+        self.assertAlmostEqual(metrics["max_baro_available_outage_s"], 0.0, places=9)
         self.assertEqual(metrics["mag_available_measurements"], 4.0)
         self.assertEqual(metrics["mag_updates"], 4.0)
         self.assertEqual(metrics["mag_management_count_update"], 3.0)
         self.assertEqual(metrics["mag_management_count_reject"], 1.0)
         self.assertEqual(metrics["mag_management_count_recover"], 0.0)
-        self.assertEqual(metrics["mag_management_count_skip"], 1.0)
+        self.assertEqual(metrics["mag_management_count_skip"], 0.0)
+        self.assertEqual(metrics["mag_management_count_unavailable"], 1.0)
+        self.assertEqual(metrics["mag_management_count_pending_init"], 0.0)
         self.assertEqual(metrics["max_mag_reject_streak"], 1.0)
+        self.assertEqual(metrics["max_mag_skip_streak"], 0.0)
         self.assertEqual(metrics["max_mag_reject_bypass_streak"], 0.0)
         self.assertEqual(metrics["max_mag_adaptive_streak"], 1.0)
         self.assertEqual(metrics["mag_recovery_scaled_updates"], 0.0)
         self.assertEqual(metrics["max_mag_recovery_scale"], 1.0)
         self.assertAlmostEqual(metrics["max_mag_outage_s"], 1.0, places=9)
         self.assertAlmostEqual(metrics["max_auxiliary_outage_s"], 0.0, places=9)
+        self.assertAlmostEqual(metrics["max_mag_available_outage_s"], 1.0, places=9)
+        self.assertAlmostEqual(metrics["max_auxiliary_available_outage_s"], 0.0, places=9)
         self.assertEqual(metrics["baro_rejections"], 1.0)
         self.assertEqual(metrics["mag_rejections"], 1.0)
         self.assertEqual(metrics["baro_adapted_updates"], 1.0)
@@ -508,9 +538,13 @@ class MetricsTests(unittest.TestCase):
 
     def test_metric_category_marks_reject_bypass_streak_as_measurement_management(self) -> None:
         self.assertEqual(metric_category("max_gnss_pos_reject_bypass_streak"), "measurement_management")
+        self.assertEqual(metric_category("max_baro_skip_streak"), "measurement_management")
         self.assertEqual(metric_category("max_baro_reject_bypass_streak"), "measurement_management")
         self.assertEqual(metric_category("gnss_pos_management_count_recover"), "measurement_management")
         self.assertEqual(metric_category("baro_recovery_scaled_updates"), "measurement_management")
+        self.assertEqual(metric_category("mag_management_count_unavailable"), "measurement_management")
+        self.assertEqual(metric_category("gnss_pos_management_count_pending_init"), "measurement_management")
+        self.assertEqual(metric_category("max_auxiliary_available_outage_s"), "measurement_management")
 
     def test_metric_supports_experiment_delta_matches_supported_categories(self) -> None:
         self.assertTrue(metric_supports_experiment_delta("position_rmse_m"))

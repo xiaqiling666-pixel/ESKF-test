@@ -55,11 +55,11 @@ class MeasurementManager:
         current_mode: str | None = None,
     ) -> MeasurementResult:
         if not model.is_available(frame):
-            return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+            return MeasurementResult(name=model.name, available=False, used=False, management_mode="unavailable")
 
         update = model.build_update(filter_engine, frame)
         if update is None:
-            return MeasurementResult(name=model.name, available=False, used=False, management_mode="skip")
+            return MeasurementResult(name=model.name, available=True, used=False, management_mode="skip")
 
         return self._apply_update(filter_engine, model, update, current_mode=current_mode)
 
