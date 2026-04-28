@@ -964,6 +964,62 @@ class AppInitializationTests(unittest.TestCase):
         self.assertAlmostEqual(metrics["mean_gnss_pos_nis"], 2.5, places=6)
         self.assertAlmostEqual(metrics["mean_gnss_vel_nis"], 1.25, places=6)
 
+    def test_pipeline_records_gnss_lever_arm_diagnostics(self) -> None:
+        base_config = load_config(PROJECT_ROOT / "01_data" / "config.json")
+        config = replace(base_config, gnss_lever_arm_body_m=[0.2, 0.0, 0.0])
+        sensor_df = pd.DataFrame(
+            {
+                "time": [0.0],
+                "ax": [0.0],
+                "ay": [0.0],
+                "az": [-9.81],
+                "gx": [0.0],
+                "gy": [0.0],
+                "gz": [2.0],
+                "gnss_x": [10.0],
+                "gnss_y": [20.0],
+                "gnss_z": [5.0],
+                "gnss_vx": [1.0],
+                "gnss_vy": [0.0],
+                "gnss_vz": [0.0],
+                "baro_h": [np.nan],
+                "mag_yaw": [0.0],
+                "truth_x": [np.nan],
+                "truth_y": [np.nan],
+                "truth_z": [np.nan],
+                "truth_vx": [np.nan],
+                "truth_vy": [np.nan],
+                "truth_vz": [np.nan],
+                "truth_yaw": [np.nan],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch("eskf_stack.app.load_config", return_value=config),
+                patch(
+                    "eskf_stack.app.load_dataset_from_config",
+                    return_value=DatasetLoadResult(dataframe=sensor_df, source_summary={"adapter_kind": "test"}),
+                ),
+                patch("eskf_stack.app.generate_demo_dataset"),
+                patch("eskf_stack.app.ensure_dir", return_value=Path(temp_dir)),
+                patch("eskf_stack.app.export_pipeline_results", return_value={}),
+            ):
+                result_df = run_pipeline()
+
+        self.assertEqual(len(result_df), 1)
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_lever_arm_body_x_m"]), 0.2, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_lever_arm_body_y_m"]), 0.0, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_lever_arm_nav_x_m"]), 0.2, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_lever_arm_nav_y_m"]), 0.0, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_lever_arm_nav_norm_m"]), 0.2, places=6)
+        self.assertAlmostEqual(float(result_df.loc[0, "gnss_lever_arm_rotational_speed_mps"]), 0.4, places=5)
+
+        metrics = compute_metrics(result_df)
+        self.assertAlmostEqual(metrics["gnss_lever_arm_body_norm_m"], 0.2, places=6)
+        self.assertAlmostEqual(metrics["max_gnss_lever_arm_nav_norm_m"], 0.2, places=6)
+        self.assertAlmostEqual(metrics["max_gnss_lever_arm_rotational_speed_mps"], 0.4, places=5)
+
     def test_pipeline_records_reject_bypass_for_gnss_measurements(self) -> None:
         config = load_config(PROJECT_ROOT / "01_data" / "config.json")
         sensor_df = pd.DataFrame(

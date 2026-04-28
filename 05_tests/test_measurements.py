@@ -14,7 +14,8 @@ if str(SRC_ROOT) not in sys.path:
 
 from eskf_stack.adapters.csv_dataset import ObservationFrame
 from eskf_stack.config import load_config
-from eskf_stack.core.state import ERROR_STATE_DIM
+from eskf_stack.core.math_utils import quat_to_rotmat
+from eskf_stack.core.state import ERROR_STATE, ERROR_STATE_DIM
 from eskf_stack.measurements import (
     BarometerMeasurement,
     GnssPositionMeasurement,
@@ -148,6 +149,20 @@ class MeasurementManagerTests(unittest.TestCase):
         self.assertFalse(result.rejected)
         self.assertEqual(result.management_mode, "skip")
         self.assertIsNone(self.filter_engine.last_R)
+
+    def test_manager_decide_has_no_filter_side_effect_before_apply(self) -> None:
+        model = DummyMeasurement(
+            residual_value=3.0,
+            policy=MeasurementPolicy(adapt_threshold=4.0, reject_threshold=16.0),
+        )
+
+        decision = self.manager.decide(self.filter_engine, model, self.frame)
+
+        self.assertEqual(decision.management_mode, "update")
+        self.assertIsNotNone(decision.effective_R)
+        self.assertIsNone(self.filter_engine.last_R)
+        self.assertIsNone(self.filter_engine.last_H)
+        self.assertIsNone(self.filter_engine.last_residual)
 
     def test_manager_can_disable_nis_rejection_for_baseline_runs(self) -> None:
         self.filter_engine.config = replace(
@@ -494,6 +509,35 @@ class MeasurementManagerTests(unittest.TestCase):
             )
         )
 
+    def test_gnss_position_measurement_applies_lever_arm_compensation(self) -> None:
+        config = replace(self.config, gnss_lever_arm_body_m=[0.2, 0.0, 0.0])
+        filter_engine = PhysicalDummyFilter(config)
+        filter_engine.state.quaternion = np.array(
+            [np.cos(np.pi / 4.0), 0.0, 0.0, np.sin(np.pi / 4.0)],
+            dtype=float,
+        )
+        frame = ObservationFrame(
+            time=0.0,
+            gnss_pos=np.array([0.0, 0.2, 0.0], dtype=float),
+            gnss_vel=None,
+            baro_h=None,
+            mag_yaw=None,
+        )
+
+        update = GnssPositionMeasurement().build_update(filter_engine, frame)
+
+        self.assertIsNotNone(update)
+        np.testing.assert_allclose(update.residual, np.zeros(3), atol=1e-9)
+        expected_attitude_jacobian = -quat_to_rotmat(filter_engine.state.quaternion) @ np.array(
+            [
+                [0.0, -0.0, 0.0],
+                [0.0, 0.0, -0.2],
+                [-0.0, 0.2, 0.0],
+            ],
+            dtype=float,
+        )
+        np.testing.assert_allclose(update.H[:, ERROR_STATE.attitude], expected_attitude_jacobian, atol=1e-9)
+
     def test_gnss_velocity_measurement_uses_anisotropic_noise(self) -> None:
         filter_engine = PhysicalDummyFilter(self.config)
         frame = ObservationFrame(
@@ -513,6 +557,33 @@ class MeasurementManagerTests(unittest.TestCase):
                 np.array([0.2**2, 0.2**2, 0.4**2], dtype=float),
             )
         )
+
+    def test_gnss_velocity_measurement_applies_lever_arm_rotation_velocity(self) -> None:
+        config = replace(self.config, gnss_lever_arm_body_m=[0.2, 0.0, 0.0])
+        filter_engine = PhysicalDummyFilter(config)
+        filter_engine.state.gyro_bias = np.array([0.1, 0.0, 0.0], dtype=float)
+        frame = ObservationFrame(
+            time=0.0,
+            gnss_pos=None,
+            gnss_vel=np.array([0.0, 0.2, 0.0], dtype=float),
+            baro_h=None,
+            mag_yaw=None,
+            gyro=np.array([0.1, 0.0, 1.0], dtype=float),
+        )
+
+        update = GnssVelocityMeasurement().build_update(filter_engine, frame)
+
+        self.assertIsNotNone(update)
+        np.testing.assert_allclose(update.residual, np.zeros(3), atol=1e-9)
+        expected_bias_jacobian = np.array(
+            [
+                [0.0, -0.0, 0.0],
+                [0.0, 0.0, -0.2],
+                [-0.0, 0.2, 0.0],
+            ],
+            dtype=float,
+        )
+        np.testing.assert_allclose(update.H[:, ERROR_STATE.gyro_bias], expected_bias_jacobian, atol=1e-9)
 
 
 if __name__ == "__main__":

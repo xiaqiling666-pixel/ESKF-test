@@ -556,6 +556,24 @@ def compute_metrics(
     if "coriolis_velocity_gradient_norm" in result_df.columns:
         metrics["mean_coriolis_velocity_gradient_norm"] = float(result_df["coriolis_velocity_gradient_norm"].mean())
         metrics["max_coriolis_velocity_gradient_norm"] = float(result_df["coriolis_velocity_gradient_norm"].max())
+    if "gnss_lever_arm_nav_norm_m" in result_df.columns:
+        lever_arm_nav_norm = pd.to_numeric(result_df["gnss_lever_arm_nav_norm_m"], errors="coerce")
+        if lever_arm_nav_norm.notna().any():
+            metrics["mean_gnss_lever_arm_nav_norm_m"] = float(lever_arm_nav_norm.mean())
+            metrics["max_gnss_lever_arm_nav_norm_m"] = float(lever_arm_nav_norm.max())
+            metrics["final_gnss_lever_arm_nav_norm_m"] = float(lever_arm_nav_norm.iloc[-1])
+    if "gnss_lever_arm_rotational_speed_mps" in result_df.columns:
+        lever_arm_rotational_speed = pd.to_numeric(result_df["gnss_lever_arm_rotational_speed_mps"], errors="coerce")
+        if lever_arm_rotational_speed.notna().any():
+            metrics["mean_gnss_lever_arm_rotational_speed_mps"] = float(lever_arm_rotational_speed.mean())
+            metrics["max_gnss_lever_arm_rotational_speed_mps"] = float(lever_arm_rotational_speed.max())
+    if "gnss_lever_arm_body_x_m" in result_df.columns:
+        lever_arm_body = result_df[["gnss_lever_arm_body_x_m", "gnss_lever_arm_body_y_m", "gnss_lever_arm_body_z_m"]].apply(
+            pd.to_numeric,
+            errors="coerce",
+        )
+        if not lever_arm_body.isna().all().all():
+            metrics["gnss_lever_arm_body_norm_m"] = float(np.linalg.norm(lever_arm_body.iloc[-1].to_numpy(dtype=float)))
     if "pos_sigma_norm_m" in result_df.columns:
         metrics["final_pos_sigma_norm_m"] = float(result_df["pos_sigma_norm_m"].iloc[-1])
     if "vel_sigma_norm_mps" in result_df.columns:

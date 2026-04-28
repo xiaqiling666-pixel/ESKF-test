@@ -1,3 +1,159 @@
+时间：2026-04-28 16:50
+任务：补齐 GNSS lever arm 主链补偿
+阶段：阶段 3 / 多源融合补强
+主线模块：GNSS position / velocity update
+
+一、本轮目标
+- 结合外部评审指出的真实工程缺口，给 GNSS 主链加入最小可用的 lever arm 支持。
+- 保持旧配置兼容，不打断当前最小完整系统主线。
+
+二、修改文件
+- 02_src/eskf_stack/config.py
+- 02_src/eskf_stack/adapters/csv_dataset.py
+- 02_src/eskf_stack/measurements/gnss_position.py
+- 02_src/eskf_stack/measurements/gnss_velocity.py
+- 01_data/config.json
+- 01_data/config_00000422_decoded.json
+- 05_tests/test_config.py
+- 05_tests/test_measurements.py
+
+三、完成内容
+1. AppConfig 新增 `gnss_lever_arm_body_m`，缺省时自动回退到 `[0, 0, 0]`，保证旧配置兼容。
+2. ObservationFrame 新增可选 `gyro` 字段，为 GNSS velocity 的转动项补偿提供输入，但旧测试不传也不会报错。
+3. GnssPositionMeasurement 现在按 `position + R_nb * lever_arm_body` 预测 GNSS 天线位置，并加入姿态 Jacobian `-R_nb * skew(r)`。
+4. GnssVelocityMeasurement 现在在有 gyro 时加入 `R_nb * (omega_body x lever_arm_body)` 的天线速度补偿，并加入 attitude / gyro_bias Jacobian。
+5. 默认配置和 decoded 样例配置显式写出零杆臂，避免这项能力只隐藏在代码 fallback 里。
+6. 新增配置测试，锁定缺少 lever arm 字段时仍会安全回退到零向量。
+7. 新增量测测试，锁定 GNSS position/velocity 的 lever arm 残差和 Jacobian 语义。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_config
+  python -m unittest 05_tests.test_measurements
+  python -m unittest 05_tests.test_app
+- 结果：
+  通过
+- 关键输出：
+  test_config：6 项通过
+  test_measurements：22 项通过
+  test_app：32 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- GNSS 主链不再默认“天线和 IMU 质心重合”，现在已经具备最小可用的杆臂补偿能力。
+- 这比继续做展示层或规则细化更接近真实无人机系统，对后续真实数据验证价值更高。
+
+七、下一步
+1. 继续检查 GNSS lever arm 是否需要进一步进入 app 输出和 metrics，至少让配置和主线行为可验证。
+2. 开始把 MeasurementManager 的判定结果对象化，给 Gate / Scale / Apply 决策链铺路。
+3. 结构收缩和 lever arm 主链再稳一轮后，再切回真实数据验证和正式实验对比。
+============================================================
+时间：2026-04-28 16:05
+任务：继续薄化 app.py，抽离 quality / mode 上下文
+阶段：阶段 1 / 最低完整项目闭环
+主线模块：app.py pipeline / mode context
+
+一、本轮目标
+- 继续结合外部评审对 app.py God file 的批评，减少 run_pipeline() 中的状态判断拼装。
+- 保持 pipeline 行为不变，只把 quality/state_machine 相关上下文抽离。
+
+二、修改文件
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/pipeline/mode_context.py
+
+三、完成内容
+1. 新增 `pipeline/mode_context.py`，集中封装 quality/state_machine 相关上下文计算。
+2. 新增 `ModeEvaluationContext`，统一承载 sensor_status、covariance_health、support_summary、quality_score、mode_state 和 sigma 诊断。
+3. 新增 `evaluate_mode_context()`，把 app.py 中原先分散的 quality/state_machine 计算逻辑抽出。
+4. app.py 现在通过 `mode_context` 取用状态判断结果，不再在主循环里重复拼 support summary 和 mode 判定。
+5. 保持现有 pipeline、metrics、退化场景行为不变，这轮是结构收缩，不引入新规则。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_app
+  python -m unittest 05_tests.test_health_state
+  python -m unittest 05_tests.test_metrics
+  python -m unittest 05_tests.test_exporter
+- 结果：
+  通过
+- 关键输出：
+  test_app：32 项通过
+  test_health_state：32 项通过
+  test_metrics：11 项通过
+  test_exporter：1 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- run_pipeline() 进一步回到“编排流程”职责，不再直接承担一整段 quality/state_machine 上下文计算。
+- 这让后续继续薄化 app.py、分离 mode 相关逻辑更安全，也降低了入口继续膨胀的风险。
+
+七、下一步
+1. 继续薄化 app.py，优先把 measurement trace 收集和 per-frame context 整理再压一层。
+2. 开始把 MeasurementManager 的判定结果对象化，给 Gate / Scale / Apply 的清晰决策链铺路。
+3. 结构收缩再稳一轮后，把 lever arm 作为下一批硬工程缺口推进。
+============================================================
+时间：2026-04-28 15:55
+任务：薄化 app.py，抽离逐帧记录构造
+阶段：阶段 1 / 最低完整项目闭环
+主线模块：app.py pipeline / record builder
+
+一、本轮目标
+- 结合外部评审里对 app.py God file 风险的批评，先抽出逐帧记录构造逻辑。
+- 保持 pipeline 行为不变，只减少 run_pipeline() 的记账职责。
+
+二、修改文件
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/pipeline/record_builder.py
+
+三、完成内容
+1. 新增 `pipeline/record_builder.py`，集中放置逐帧输出记录构造逻辑。
+2. 新增 `MeasurementTraceSnapshot`，把 measurement manager 相关逐帧字典打包成显式对象。
+3. 抽出 `build_preinit_record()`，不再让 pre-init 记录逻辑留在 app.py 主流程里。
+4. 抽出 `build_runtime_record()`，把正常运行帧的大块 record 拼装从 run_pipeline() 中移走。
+5. 保留原有输出字段和语义，确保这轮是职责收缩，不是行为改写。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_app
+  python -m unittest 05_tests.test_metrics
+  python -m unittest 05_tests.test_exporter
+- 结果：
+  通过
+- 关键输出：
+  test_app：32 项通过
+  test_metrics：11 项通过
+  test_exporter：1 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- run_pipeline() 的主职责开始回到“流程编排”，不再同时承担大块记录拼装。
+- 这为后续继续拆 `app.py`、压缩入口复杂度提供了安全落点，而且没有打破当前主线行为。
+
+七、下一步
+1. 继续薄化 app.py，优先抽出 support/mode 上下文整理，减少主循环局部变量堆积。
+2. 评估把 MeasurementManager 的判定结果对象化，朝 Gate / Scale / Apply 的清晰决策链过渡。
+3. 在结构收口一轮后，再把 lever arm 作为下一批硬工程缺口推进。
 ============================================================
 时间：2026-04-28 12:10
 任务：阶段收口检查并修复全量回归中的阈值漂移
@@ -606,4 +762,328 @@
 1. 继续沿主线检查多源 update 到 metrics 还有没有类似“语义混淆但统计混在一起”的断口。
 2. 再检查 quality/state_machine 是否还把 unavailable 和真正 skip 的情况混在一起使用。
 3. 等最低完整项目再稳一轮后，再切回真实数据验证和正式实验对比。
+============================================================
+时间：2026-04-28 16:55
+任务：把 MeasurementManager 结果对象化，给决策链拆分铺路
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：MeasurementManager / app pipeline
+
+一、本轮目标
+- 在不改主线行为的前提下，把 MeasurementManager 先收成“先决策、再应用”的结构。
+- 为后续 Gate / Scale / Apply 拆分铺一个稳定中间层。
+
+二、修改文件
+- 02_src/eskf_stack/measurements/base.py
+- 02_src/eskf_stack/measurements/manager.py
+
+三、完成内容
+1. 在 base.py 新增 MeasurementDecision，集中承载 availability、update、effective_R、nis、reject_bypassed、各类 scale 和 management_mode。
+2. MeasurementManager.process() 现在改成先调用 decide() 产出决策对象，再调用 _apply_decision() 应用到滤波器。
+3. 新增 decide()，显式区分 unavailable、skip 和真正进入更新判定链的量测。
+4. 原先混在 _apply_update() 里的 reject / adaptive / recover / mode_scale 逻辑，收进 _build_decision()，先产出结构化判定结果。
+5. _apply_decision() 只负责根据 decision 决定是否调用 filter update，并回填 MeasurementResult，manager 主线职责更清楚。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_measurements
+  python -m unittest 05_tests.test_app
+  python -m unittest 05_tests.test_metrics
+- 结果：
+  通过
+- 关键输出：
+  test_measurements：22 项通过
+  test_app：32 项通过
+  test_metrics：11 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- MeasurementManager 现在开始从“逻辑全塞在 process 里”往“决策对象 + 应用动作”收。
+- 这让后面继续拆 Gate / Scale / Apply 时，不需要再从混合逻辑里硬拆，主线结构风险更低。
+
+七、下一步
+1. 继续把 MeasurementManager 的 gate / scale / apply 边界再拉开一层，减少 manager 内部责任耦合。
+2. 继续薄化 app.py，优先看 measurement trace 收集和 per-frame context 是否还能再压缩。
+3. 结构再稳一轮后，把 lever arm 的输出可验证性和真实数据前置检查补上。
+============================================================
+时间：2026-04-28 17:03
+任务：继续拆开 MeasurementManager 的 gate / scale 决策链
+阶段：阶段 2 / 稳定性和退化处理
+主线模块：MeasurementManager
+
+一、本轮目标
+- 在已有 MeasurementDecision 基础上，把 manager 内部再明确拆成 gate 和 scale 两段。
+- 补一个 decide 无副作用测试，确认“先决策、后应用”不是口头结构。
+
+二、修改文件
+- 02_src/eskf_stack/measurements/manager.py
+- 05_tests/test_measurements.py
+
+三、完成内容
+1. manager.py 新增 `_GatedMeasurement` 和 `_ScaledMeasurement`，把 gate 和 scale 中间结果显式化。
+2. `_build_decision()` 现在先走 `_gate_measurement()`，再走 `_scale_measurement()`，reject、adaptive、recover 不再继续混在一个大分支里。
+3. reject 路径也改成复用 gate 结果，不再重复重算 mode_scale 和 NIS。
+4. 新增 `test_manager_decide_has_no_filter_side_effect_before_apply`，锁定 `decide()` 只产出决策，不触发滤波器 update。
+5. 这轮没有改 manager 对外行为，只继续把内部职责边界拉开，为后续 Gate / Scale / Apply 完整拆分铺路。
+
+四、验证情况
+- 命令：
+  python -m py_compile 02_src/eskf_stack/measurements/manager.py 05_tests/test_measurements.py
+  python -m unittest 05_tests.test_measurements
+  python -m unittest 05_tests.test_app 05_tests.test_metrics
+- 结果：
+  通过
+- 关键输出：
+  test_measurements：23 项通过
+  test_app：32 项通过
+  test_metrics：11 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- MeasurementManager 现在不只是在表面上“有一个 decision 对象”，而是内部真的开始分成 gate 和 scale 两段。
+- 这让后面继续拆 apply 或排查观测处理原因时，更接近一条可解释的决策链，而不是继续堆在一个大函数里。
+
+七、下一步
+1. 继续把 MeasurementManager 的 apply 环节再拉开一层，逐步形成更清楚的 Gate / Scale / Apply 结构。
+2. 继续薄化 app.py，优先看 measurement trace 收集和 per-frame context 是否还能再压缩。
+3. 结构稳一轮后，补 lever arm 的输出可验证性和真实数据前置检查。
+============================================================
+时间：2026-04-28 17:08
+任务：继续收口 MeasurementManager 和 app.py 结构复杂度
+阶段：阶段 1 / 最低完整项目闭环
+主线模块：MeasurementManager / app pipeline
+
+一、本轮目标
+- 继续把 MeasurementManager 拉向更清楚的 Gate / Scale / Apply 决策链。
+- 继续薄化 app.py，把 measurement trace 和 measurement pass 再从主循环里抽走。
+
+二、修改文件
+- 02_src/eskf_stack/measurements/manager.py
+- 05_tests/test_measurements.py
+- 02_src/eskf_stack/pipeline/record_builder.py
+- 02_src/eskf_stack/pipeline/measurement_pass.py
+- 02_src/eskf_stack/app.py
+
+三、完成内容
+1. manager.py 新增 `_GatedMeasurement` 和 `_ScaledMeasurement`，把 gate / scale 中间结果显式化。
+2. `_build_decision()` 现在先走 `_gate_measurement()`，再走 `_scale_measurement()`，reject / adaptive / recover 的内部边界更清楚。
+3. 新增 `test_manager_decide_has_no_filter_side_effect_before_apply`，锁定 `decide()` 只产出决策，不直接触发滤波器 update。
+4. record_builder.py 新增 `MeasurementTraceCollector`，统一管理 measurement trace 的默认值、policy 阈值记录、result 回填和 snapshot 生成。
+5. 新增 pipeline/measurement_pass.py，把 measurement loop 中的 `policy -> manager -> freshness -> trace` 整段流程抽成 `run_measurement_pass()`。
+6. app.py 主循环现在直接吃 `measurement_pass.trace` 和 `measurement_pass.innovation_norms`，不再手工维护十几组并行字典。
+
+四、验证情况
+- 命令：
+  python -m py_compile 02_src/eskf_stack/measurements/manager.py 05_tests/test_measurements.py
+  python -m unittest 05_tests.test_measurements
+  python -m unittest 05_tests.test_app 05_tests.test_metrics
+  python -m py_compile 02_src/eskf_stack/app.py 02_src/eskf_stack/pipeline/record_builder.py 02_src/eskf_stack/pipeline/measurement_pass.py
+  python -m unittest 05_tests.test_app 05_tests.test_metrics 05_tests.test_exporter
+- 结果：
+  通过
+- 关键输出：
+  test_measurements：23 项通过
+  test_app：32 项通过
+  test_metrics：11 项通过
+  test_exporter：1 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- MeasurementManager 现在已经从“一个大 process 混合逻辑”进一步收成了更清楚的 gate / scale / apply 轮廓。
+- app.py 也继续从“入口里手工记账”往“主流程编排器 + pipeline helper”收，结构风险明显下降。
+
+七、下一步
+1. 继续把 MeasurementManager 的 apply 环节再拉开一层，尽量把 Gate / Scale / Apply 收成清楚链条。
+2. 再继续薄化 app.py，优先看初始化记录和 runtime context 还能不能继续压缩职责。
+3. 结构再稳一轮后，补 lever arm 的输出可验证性和真实数据前置检查。
+============================================================
+时间：2026-04-28 17:13
+任务：持续收口 MeasurementManager 和 app.py 的结构复杂度
+阶段：阶段 1 / 最低完整项目闭环
+主线模块：MeasurementManager / app pipeline
+
+一、本轮目标
+- 不按五分钟切任务，继续把当前结构主线往下收。
+- 把 MeasurementManager 再拆清一层，并继续薄化 app.py 的 measurement / initialization 主循环逻辑。
+
+二、修改文件
+- 02_src/eskf_stack/measurements/manager.py
+- 05_tests/test_measurements.py
+- 02_src/eskf_stack/pipeline/record_builder.py
+- 02_src/eskf_stack/pipeline/measurement_pass.py
+- 02_src/eskf_stack/pipeline/initialization_pass.py
+- 02_src/eskf_stack/app.py
+
+三、完成内容
+1. manager.py 新增 `_GatedMeasurement` 和 `_ScaledMeasurement`，把 gate / scale 中间结果显式化。
+2. 新增 `test_manager_decide_has_no_filter_side_effect_before_apply`，锁定 `decide()` 只产出决策，不触发滤波器 update。
+3. record_builder.py 新增 `MeasurementTraceCollector`，把 measurement trace 的默认值、policy 阈值记录、result 回填和 snapshot 生成集中到一个 helper。
+4. 新增 `pipeline/measurement_pass.py`，把 `policy -> manager -> freshness -> trace` 整段 measurement loop 从 app.py 主循环里抽出。
+5. 新增 `pipeline/initialization_pass.py`，把 pre-init / bootstrap / initialized_this_frame 这段初始化流程从 app.py 主循环里抽出。
+6. app.py 主循环继续收薄，当前已经主要负责：初始化 pass、predict、measurement pass、mode context、runtime record 和 export 编排。
+
+四、验证情况
+- 命令：
+  python -m py_compile 02_src/eskf_stack/measurements/manager.py 05_tests/test_measurements.py
+  python -m unittest 05_tests.test_measurements
+  python -m unittest 05_tests.test_app 05_tests.test_metrics
+  python -m py_compile 02_src/eskf_stack/app.py 02_src/eskf_stack/pipeline/record_builder.py 02_src/eskf_stack/pipeline/measurement_pass.py
+  python -m unittest 05_tests.test_app 05_tests.test_metrics 05_tests.test_exporter
+  python -m py_compile 02_src/eskf_stack/app.py 02_src/eskf_stack/pipeline/initialization_pass.py
+  python -m unittest 05_tests.test_app 05_tests.test_metrics 05_tests.test_exporter
+  python -m unittest 05_tests.test_measurements
+- 结果：
+  通过
+- 关键输出：
+  test_measurements：23 项通过
+  test_app：32 项通过
+  test_metrics：11 项通过
+  test_exporter：1 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- MeasurementManager 现在已经更接近一条可解释的 Gate / Scale / Apply 决策链，不再只是一个混合大函数。
+- app.py 当前已进一步收薄到约 220 行左右，measurement loop 和 initialization loop 都开始外移，God file 风险明显下降。
+
+七、下一步
+1. 再继续检查 app.py 是否还剩值得抽离的 runtime context / export 前处理职责，但不做为了拆而拆。
+2. 补 lever arm 的输出可验证性，确保这条真实工程能力不只是代码里有实现。
+3. 然后做一轮最小主线场景验收，确认周四前“像 KF-GINS 一样的初步完成状态”已经站住。
+============================================================
+时间：2026-04-28 17:20
+任务：补 lever arm 的输出可验证性
+阶段：阶段 3 / 多源融合补强
+主线模块：GNSS update / metrics / pipeline output
+
+一、本轮目标
+- 不只让 lever arm 停留在 GNSS 更新代码里，还要让 pipeline 输出和 metrics 能直接验证它是否生效。
+- 为周四前的最小主线验收补一条更接近真实工程的检查链。
+
+二、修改文件
+- 02_src/eskf_stack/pipeline/lever_arm_context.py
+- 02_src/eskf_stack/pipeline/record_builder.py
+- 02_src/eskf_stack/app.py
+- 02_src/eskf_stack/analysis/evaluator.py
+- 05_tests/test_app.py
+- 05_tests/test_metrics.py
+
+三、完成内容
+1. 新增 `pipeline/lever_arm_context.py`，提供 `GnssLeverArmDiagnostics` 和 `evaluate_gnss_lever_arm_diagnostics()`。
+2. runtime record 现在新增 lever arm 诊断字段：
+   - `gnss_lever_arm_body_*`
+   - `gnss_lever_arm_nav_*`
+   - `gnss_lever_arm_nav_norm_m`
+   - `gnss_lever_arm_rotational_velocity_nav_*`
+   - `gnss_lever_arm_rotational_speed_mps`
+3. app.py 在每帧 runtime record 生成前会计算 lever arm diagnostics，并写入输出。
+4. evaluator.py 新增 lever arm metrics：
+   - `gnss_lever_arm_body_norm_m`
+   - `mean/max/final_gnss_lever_arm_nav_norm_m`
+   - `mean/max_gnss_lever_arm_rotational_speed_mps`
+5. 新增 app 级测试，锁定非零 lever arm 时 pipeline 输出和 metrics 都能看到对应诊断值。
+6. 扩展 metrics 测试，锁定 lever arm 指标进入 metrics 汇总。
+
+四、验证情况
+- 命令：
+  python -m py_compile 02_src/eskf_stack/app.py 02_src/eskf_stack/pipeline/lever_arm_context.py 02_src/eskf_stack/pipeline/record_builder.py 02_src/eskf_stack/analysis/evaluator.py 05_tests/test_app.py 05_tests/test_metrics.py
+  python -m unittest 05_tests.test_app 05_tests.test_metrics 05_tests.test_exporter
+  python -m unittest 05_tests.test_measurements 05_tests.test_config
+- 结果：
+  通过
+- 关键输出：
+  test_app：33 项通过
+  test_metrics：11 项通过
+  test_exporter：1 项通过
+  test_measurements：23 项通过
+  test_config：6 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 现在 lever arm 不再只是“GNSS 更新里做了补偿”，而是已经能在 runtime output 和 metrics 里被直接看见和验证。
+- 这让后面做最小主线验收或真实数据前检查时，能更直接确认杆臂配置是否真的进入了主链。
+
+七、下一步
+1. 做一轮最小主线场景验收，重点看正常融合、GNSS 中断、GNSS 恢复、辅助源单源异常。
+2. 再看 app.py 是否还剩值得继续抽离的 export 前处理职责，但不为了拆而拆。
+3. 如果最小主线验收站住，再进入真实数据和正式实验前置准备。
+============================================================
+时间：2026-04-28 17:30
+任务：最小主线场景验收
+阶段：阶段 1 / 最低完整闭环收口
+主线模块：pipeline / metrics / 退化恢复验收
+
+一、本轮目标
+- 按今天“尽量搭完、后两天调试补细节”的目标，补一组最小主线验收，确认 pipeline 输出、metrics、lever arm 诊断和 GNSS 中断记录能形成闭环。
+
+二、修改文件
+- 05_tests/test_mainline_acceptance.py
+
+三、完成内容
+1. 新增 `test_minimum_pipeline_exports_fusion_output_metrics_and_lever_arm_diagnostics`，用最小多源数据跑真实 export 路径，检查 `fusion_output.csv`、`metrics.csv`、`metrics_summary.txt` 都生成。
+2. 同一验收锁定 GNSS position / velocity、baro、mag yaw 都能进入 used 统计，并检查 lever arm nav norm、rotational speed 和 metrics 中的 lever arm 指标。
+3. 新增 `test_pipeline_records_gnss_outage_hold_and_recovery_in_acceptance_scenario`，用 GNSS 可用-中断-恢复的小场景检查 `INERTIAL_HOLD` 目标态、实际模式进入、GNSS unavailable 计数、baro 作为辅助源持续更新。
+4. 本轮没有新增正式实验、batch 细节、manifest、preview 或 CLI 输出整理。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_mainline_acceptance
+  python -m unittest 05_tests.test_mainline_acceptance 05_tests.test_app 05_tests.test_metrics 05_tests.test_measurements 05_tests.test_config 05_tests.test_exporter
+  python -m unittest discover -s 05_tests
+- 结果：
+  通过
+- 关键输出：
+  test_mainline_acceptance：2 项通过
+  主线相关回归：76 项通过
+  全量 unittest：135 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 最低完整主线现在有了集中验收：不是只看单个函数，而是能确认多源输入、初始化后融合、输出文件、metrics、GNSS 中断和辅助源保持都能同时跑通。
+- 这让项目从“模块分别可用”进一步接近“像 KF-GINS 一样的初步可运行离线融合工具”，后续重点可以转为真实数据接入、参数调试和论文主线收缩。
+
+七、下一步
+1. 用一组最小真实或半真实 CSV 跑通当前主入口，优先看时间戳、坐标系、GNSS/baro/mag 字段映射是否稳定。
+2. 做一轮真实数据前的配置收敛：噪声、lever arm、初始化路径、GNSS 中断阈值只保留默认主路径和必要 debug 开关。
+3. 周四前做阶段收口清单：README 主贡献一句话、默认输出字段瘦身建议、已知限制和真实数据验证计划。
 ============================================================

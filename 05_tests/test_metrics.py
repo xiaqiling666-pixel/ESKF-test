@@ -142,6 +142,11 @@ class MetricsTests(unittest.TestCase):
                     "applied",
                     "applied",
                 ],
+                "gnss_lever_arm_body_x_m": [0.2, 0.2, 0.2, 0.2, 0.2],
+                "gnss_lever_arm_body_y_m": [0.0, 0.0, 0.0, 0.0, 0.0],
+                "gnss_lever_arm_body_z_m": [0.0, 0.0, 0.0, 0.0, 0.0],
+                "gnss_lever_arm_nav_norm_m": [0.2, 0.2, 0.2, 0.2, 0.2],
+                "gnss_lever_arm_rotational_speed_mps": [0.1, 0.2, 0.3, 0.2, 0.1],
             }
         )
 
@@ -322,6 +327,12 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics["mag_nis_reject_exceed_not_rejected_count"], 1.0)
         self.assertEqual(metrics["mag_nis_reject_policy_bypass_count"], 1.0)
         self.assertEqual(metrics["mag_nis_reject_policy_bypass_pct"], 100.0)
+        self.assertAlmostEqual(metrics["gnss_lever_arm_body_norm_m"], 0.2, places=9)
+        self.assertAlmostEqual(metrics["mean_gnss_lever_arm_nav_norm_m"], 0.2, places=9)
+        self.assertAlmostEqual(metrics["max_gnss_lever_arm_nav_norm_m"], 0.2, places=9)
+        self.assertAlmostEqual(metrics["final_gnss_lever_arm_nav_norm_m"], 0.2, places=9)
+        self.assertAlmostEqual(metrics["mean_gnss_lever_arm_rotational_speed_mps"], 0.18, places=9)
+        self.assertAlmostEqual(metrics["max_gnss_lever_arm_rotational_speed_mps"], 0.3, places=9)
 
     def test_reject_policy_bypass_metrics_capture_disabled_rejection_case(self) -> None:
         result_df = pd.DataFrame(

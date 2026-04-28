@@ -35,6 +35,23 @@ class MeasurementUpdate:
 
 
 @dataclass(frozen=True)
+class MeasurementDecision:
+    name: str
+    available: bool
+    update: MeasurementUpdate | None = None
+    effective_R: np.ndarray | None = None
+    innovation_value: float = 0.0
+    nis: float | None = None
+    rejected: bool = False
+    reject_bypassed: bool = False
+    adaptation_scale: float = 1.0
+    recovery_scale: float = 1.0
+    mode_scale: float = 1.0
+    applied_r_scale: float = 1.0
+    management_mode: str = "unavailable"
+
+
+@dataclass(frozen=True)
 class MeasurementPolicy:
     adapt_threshold: float | None = None
     reject_threshold: float | None = None

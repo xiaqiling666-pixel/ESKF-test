@@ -29,6 +29,7 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(config.fusion_policy.use_recovery_scale)
         self.assertGreater(config.innovation_management.baro_nis_reject_threshold, 0.0)
         self.assertGreater(config.innovation_management.mag_yaw_nis_reject_threshold, 0.0)
+        self.assertEqual(config.gnss_lever_arm_body_m, [0.0, 0.0, 0.0])
         self.assertGreater(config.measurement_noise.gnss_pos_vertical_std, config.measurement_noise.gnss_pos_std)
         self.assertGreater(config.measurement_noise.gnss_vel_vertical_std, config.measurement_noise.gnss_vel_std)
 
@@ -42,6 +43,7 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(config.time_step_management.skip_large_dt)
         self.assertGreater(config.innovation_management.baro_nis_adapt_threshold, 0.0)
         self.assertGreater(config.innovation_management.mag_yaw_nis_adapt_threshold, 0.0)
+        self.assertEqual(config.gnss_lever_arm_body_m, [0.0, 0.0, 0.0])
         self.assertGreater(config.measurement_noise.gnss_pos_vertical_std, config.measurement_noise.gnss_pos_std)
         self.assertGreater(config.measurement_noise.gnss_vel_vertical_std, config.measurement_noise.gnss_vel_std)
 
@@ -96,6 +98,20 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(config.measurement_noise.gnss_pos_vertical_std, config.measurement_noise.gnss_pos_std)
         self.assertEqual(config.measurement_noise.gnss_vel_vertical_std, config.measurement_noise.gnss_vel_std)
+
+    def test_gnss_lever_arm_defaults_to_zero_when_missing(self) -> None:
+        payload = json.loads((PROJECT_ROOT / "01_data" / "config.json").read_text(encoding="utf-8"))
+        payload["config_metadata"]["profile"] = "sample_validation"
+        payload["config_metadata"]["name"] = "gnss lever arm fallback test"
+        payload.pop("gnss_lever_arm_body_m", None)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "fallback_lever_arm.json"
+            config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            config = load_config(config_path)
+
+        self.assertEqual(config.gnss_lever_arm_body_m, [0.0, 0.0, 0.0])
 
 
 if __name__ == "__main__":

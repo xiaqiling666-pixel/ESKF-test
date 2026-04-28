@@ -30,6 +30,7 @@ class ObservationFrame:
     gnss_vel: np.ndarray | None
     baro_h: float | None
     mag_yaw: float | None
+    gyro: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,7 @@ def observation_view(frame: SensorFrame) -> ObservationFrame:
         gnss_vel=frame.gnss_vel,
         baro_h=frame.baro_h,
         mag_yaw=frame.mag_yaw,
+        gyro=frame.gyro,
     )
 
 

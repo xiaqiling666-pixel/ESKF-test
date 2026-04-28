@@ -129,6 +129,7 @@ class AppConfig:
     fusion_policy: FusionPolicy
     mode_measurement_scaling: ModeMeasurementScaling
     navigation_environment: NavigationEnvironmentConfig
+    gnss_lever_arm_body_m: list[float]
     use_baro: bool
     use_mag: bool
 
@@ -244,6 +245,7 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
                 },
             )
         ),
+        gnss_lever_arm_body_m=list(payload.get("gnss_lever_arm_body_m", [0.0, 0.0, 0.0])),
         use_baro=payload["use_baro"],
         use_mag=payload["use_mag"],
     )
