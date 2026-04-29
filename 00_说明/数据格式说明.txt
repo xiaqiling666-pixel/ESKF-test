@@ -1,6 +1,29 @@
 输入数据文件
 默认读取 01_data\generated\demo_sensor_log.csv
 
+2026-04-28 收口更新
+当前 standard CSV 已经进入最小主线验收。
+也就是说，
+项目已经验证过：
+标准 CSV 可以通过真实 loader 进入 pipeline，
+并生成 `fusion_output.csv`、`metrics.csv`、`dataset_source_summary.txt`。
+
+新增输入质量字段会帮助判断：
+1. 是否存在 direct init 候选。
+2. 第一帧 GNSS 位置何时出现。
+3. 第一帧 direct init 候选何时出现。
+4. GNSS position / GNSS velocity / baro / mag yaw 是否有同帧完整观测。
+
+新增 GNSS 杆臂配置：
+`gnss_lever_arm_body_m`
+
+含义：
+GNSS 天线相对 IMU 坐标系原点的固定杆臂，
+单位 m。
+当前 GNSS 位置和速度更新都会使用这个固定杆臂。
+如果不确定真实安装偏移，
+先保持 `[0.0, 0.0, 0.0]`。
+
 当前输入方式
 项目现在不只支持单个标准 csv。
 当前共有三类入口：

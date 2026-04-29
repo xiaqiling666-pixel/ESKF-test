@@ -42,6 +42,18 @@ def _availability(
     return available_rows
 
 
+def _first_time_or_nan(dataframe: pd.DataFrame, mask: pd.Series) -> float:
+    if not bool(mask.any()):
+        return float("nan")
+    return float(dataframe.loc[mask, "time"].iloc[0])
+
+
+def _first_time_text(value: float) -> str:
+    if not np.isfinite(value):
+        return "nan"
+    return f"{value:.6f}"
+
+
 def _time_quality(raw_dataframe: pd.DataFrame, summary: dict[str, str], metrics: dict[str, float]) -> None:
     row_count = int(len(raw_dataframe))
     if "time" not in raw_dataframe.columns or row_count == 0:
@@ -194,5 +206,48 @@ def build_input_quality_report(raw_dataframe: pd.DataFrame, standardized_datafra
     summary["input_quality_diagnostic_truth_present"] = _bool_text(has_any_truth)
     metrics["input_quality_optional_measurement_present_flag"] = 1.0 if has_any_measurement else 0.0
     metrics["input_quality_diagnostic_truth_present_flag"] = 1.0 if has_any_truth else 0.0
+
+    gnss_pos_mask = _complete_vector_mask(standardized_dataframe, ("gnss_x", "gnss_y", "gnss_z"))
+    gnss_vel_mask = _complete_vector_mask(standardized_dataframe, ("gnss_vx", "gnss_vy", "gnss_vz"))
+    baro_mask = _complete_scalar_mask(standardized_dataframe, "baro_h")
+    mag_mask = _complete_scalar_mask(standardized_dataframe, "mag_yaw")
+    velocity_heading_mask = gnss_vel_mask & (
+        np.hypot(
+            standardized_dataframe["gnss_vx"].to_numpy(dtype=float),
+            standardized_dataframe["gnss_vy"].to_numpy(dtype=float),
+        )
+        > 1.0e-6
+    )
+    heading_mask = mag_mask | velocity_heading_mask
+    direct_init_candidate_mask = gnss_pos_mask & heading_mask
+    full_measurement_mask = gnss_pos_mask & gnss_vel_mask & baro_mask & mag_mask
+
+    direct_init_candidate_rows = int(direct_init_candidate_mask.sum())
+    full_measurement_rows = int(full_measurement_mask.sum())
+    first_gnss_pos_time_s = _first_time_or_nan(standardized_dataframe, gnss_pos_mask)
+    first_direct_init_time_s = _first_time_or_nan(standardized_dataframe, direct_init_candidate_mask)
+    first_full_measurement_time_s = _first_time_or_nan(standardized_dataframe, full_measurement_mask)
+    full_measurement_ratio = 0.0 if row_count == 0 else full_measurement_rows / row_count
+
+    summary.update(
+        {
+            "input_quality_direct_init_candidate_rows": str(direct_init_candidate_rows),
+            "input_quality_first_gnss_pos_time_s": _first_time_text(first_gnss_pos_time_s),
+            "input_quality_first_direct_init_candidate_time_s": _first_time_text(first_direct_init_time_s),
+            "input_quality_full_measurement_rows": str(full_measurement_rows),
+            "input_quality_full_measurement_coverage_ratio": f"{full_measurement_ratio:.6f}",
+            "input_quality_first_full_measurement_time_s": _first_time_text(first_full_measurement_time_s),
+        }
+    )
+    metrics.update(
+        {
+            "input_quality_direct_init_candidate_rows": float(direct_init_candidate_rows),
+            "input_quality_first_gnss_pos_time_s": first_gnss_pos_time_s,
+            "input_quality_first_direct_init_candidate_time_s": first_direct_init_time_s,
+            "input_quality_full_measurement_rows": float(full_measurement_rows),
+            "input_quality_full_measurement_coverage_ratio": float(full_measurement_ratio),
+            "input_quality_first_full_measurement_time_s": first_full_measurement_time_s,
+        }
+    )
 
     return InputQualityReport(summary=summary, metrics=metrics)

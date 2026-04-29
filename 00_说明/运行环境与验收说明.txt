@@ -6,6 +6,25 @@
 怎样做低副作用检查，
 怎样区分“检查入口”和“会生成结果的运行入口”。
 
+2026-04-28 收口更新
+当前最低完整闭环已经基本搭好。
+推荐的日常验收仍然是：
+`python -m unittest discover -s 05_tests`
+
+截至今天收口，
+全量单元测试已达到 141 项通过。
+这个数字只代表当前代码回归面，
+不代表真实飞行数据验证已经完成。
+
+新增主线验收覆盖：
+1. standard CSV 真实 loader。
+2. 初始化和多源更新。
+3. fusion_output.csv 和 metrics.csv。
+4. input quality 进入 summary 和 metrics。
+5. GNSS lever arm 诊断。
+6. GNSS 中断、辅助源保持和恢复记录。
+7. 配置加载阶段的坏配置拦截。
+
 一、推荐运行环境
 
 当前项目是 Python 离线研究原型。
@@ -62,7 +81,7 @@
 
 日常开发优先运行：
 
-`python -m unittest discover 05_tests`
+`python -m unittest discover -s 05_tests`
 
 或双击：
 
@@ -109,7 +128,7 @@
 最低验收标准是：
 
 1. 环境检查能通过。
-2. `python -m unittest discover 05_tests` 能通过。
+2. `python -m unittest discover -s 05_tests` 能通过。
 3. 默认配置、样例配置和实验配置的角色不互相覆盖。
 4. 运行入口和检查入口分清楚。
 5. 不因为一次普通检查生成新的结果污染。
@@ -126,4 +145,3 @@
 - 是否生成结果文件
 - 输出目录在哪里
 - 是否适合日常开发检查
-

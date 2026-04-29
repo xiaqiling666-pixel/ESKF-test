@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+import math
 from pathlib import Path
 from typing import Any
 
@@ -170,11 +171,125 @@ def _load_measurement_noise(payload: dict[str, Any]) -> MeasurementNoise:
     return MeasurementNoise(**measurement_noise_payload)
 
 
+def _require_finite(name: str, value: float) -> float:
+    numeric_value = float(value)
+    if not math.isfinite(numeric_value):
+        raise ValueError(f"配置项 {name} 必须是有限数值")
+    return numeric_value
+
+
+def _require_positive(name: str, value: float) -> None:
+    numeric_value = _require_finite(name, value)
+    if numeric_value <= 0.0:
+        raise ValueError(f"配置项 {name} 必须大于 0")
+
+
+def _validate_vector3(name: str, values: list[float]) -> None:
+    if len(values) != 3:
+        raise ValueError(f"配置项 {name} 必须是 3 维向量")
+    for index, value in enumerate(values):
+        _require_finite(f"{name}[{index}]", value)
+
+
+def _validate_threshold_pair(name: str, adapt_threshold: float, reject_threshold: float) -> None:
+    _require_positive(f"{name}_nis_adapt_threshold", adapt_threshold)
+    _require_positive(f"{name}_nis_reject_threshold", reject_threshold)
+    if float(reject_threshold) < float(adapt_threshold):
+        raise ValueError(f"配置项 {name} 的 reject threshold 不能小于 adapt threshold")
+
+
+def _validate_mode_scales(name: str, scales: dict[str, float]) -> None:
+    for mode_name, scale in scales.items():
+        _require_positive(f"mode_measurement_scaling.{name}.{mode_name}", scale)
+
+
+def validate_config(config: AppConfig) -> None:
+    _validate_vector3("gravity", config.gravity)
+    _validate_vector3("gnss_lever_arm_body_m", config.gnss_lever_arm_body_m)
+
+    for field_name in (
+        "accel_std",
+        "gyro_std",
+        "gyro_bias_std",
+        "accel_bias_std",
+    ):
+        _require_positive(f"process_noise.{field_name}", getattr(config.process_noise, field_name))
+    for field_name in (
+        "gnss_pos_std",
+        "gnss_vel_std",
+        "gnss_pos_vertical_std",
+        "gnss_vel_vertical_std",
+        "baro_std",
+        "yaw_std_deg",
+    ):
+        _require_positive(f"measurement_noise.{field_name}", getattr(config.measurement_noise, field_name))
+    for field_name in (
+        "pos_std",
+        "vel_std",
+        "att_std_deg",
+        "gyro_bias_std",
+        "accel_bias_std",
+    ):
+        _require_positive(f"initial_covariance.{field_name}", getattr(config.initial_covariance, field_name))
+
+    _require_positive("initialization.static_window_duration_s", config.initialization.static_window_duration_s)
+    if int(config.initialization.static_window_min_samples) <= 0:
+        raise ValueError("配置项 initialization.static_window_min_samples 必须大于 0")
+    _require_positive("initialization.static_max_accel_std_mps2", config.initialization.static_max_accel_std_mps2)
+    _require_positive("initialization.static_max_gyro_std_radps", config.initialization.static_max_gyro_std_radps)
+    _require_positive(
+        "initialization.static_gravity_norm_tolerance_mps2",
+        config.initialization.static_gravity_norm_tolerance_mps2,
+    )
+    _require_positive("initialization.bootstrap_min_dt_s", config.initialization.bootstrap_min_dt_s)
+    _require_positive(
+        "initialization.bootstrap_min_horizontal_displacement_m",
+        config.initialization.bootstrap_min_horizontal_displacement_m,
+    )
+    _require_positive("initialization.heading_wait_timeout_s", config.initialization.heading_wait_timeout_s)
+
+    _require_positive("time_step_management.min_positive_dt_s", config.time_step_management.min_positive_dt_s)
+    _require_positive("time_step_management.max_dt_s", config.time_step_management.max_dt_s)
+    if float(config.time_step_management.max_dt_s) <= float(config.time_step_management.min_positive_dt_s):
+        raise ValueError("配置项 time_step_management.max_dt_s 必须大于 min_positive_dt_s")
+
+    _validate_threshold_pair(
+        "gnss_pos",
+        config.innovation_management.gnss_pos_nis_adapt_threshold,
+        config.innovation_management.gnss_pos_nis_reject_threshold,
+    )
+    _validate_threshold_pair(
+        "gnss_vel",
+        config.innovation_management.gnss_vel_nis_adapt_threshold,
+        config.innovation_management.gnss_vel_nis_reject_threshold,
+    )
+    _validate_threshold_pair(
+        "baro",
+        config.innovation_management.baro_nis_adapt_threshold,
+        config.innovation_management.baro_nis_reject_threshold,
+    )
+    _validate_threshold_pair(
+        "mag_yaw",
+        config.innovation_management.mag_yaw_nis_adapt_threshold,
+        config.innovation_management.mag_yaw_nis_reject_threshold,
+    )
+
+    if config.navigation_environment.frame != "ENU":
+        raise ValueError("配置项 navigation_environment.frame 当前仅支持 ENU")
+    _require_finite("navigation_environment.reference_lat_deg", config.navigation_environment.reference_lat_deg)
+    _require_finite("navigation_environment.reference_lon_deg", config.navigation_environment.reference_lon_deg)
+    _require_finite("navigation_environment.reference_height_m", config.navigation_environment.reference_height_m)
+
+    if config.mode_measurement_scaling.enabled:
+        _validate_mode_scales("gnss_pos", config.mode_measurement_scaling.gnss_pos)
+        _validate_mode_scales("gnss_vel", config.mode_measurement_scaling.gnss_vel)
+
+
 def load_config(config_path: str | Path | None = None) -> AppConfig:
     path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
     payload = json.loads(path.read_text(encoding="utf-8"))
     metadata = _load_config_metadata(payload, path)
-    return AppConfig(
+    config = AppConfig(
         config_path=str(path),
         config_metadata=metadata,
         dataset_path=payload["dataset_path"],
@@ -249,3 +364,5 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         use_baro=payload["use_baro"],
         use_mag=payload["use_mag"],
     )
+    validate_config(config)
+    return config

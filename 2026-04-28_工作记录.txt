@@ -1087,3 +1087,161 @@
 2. 做一轮真实数据前的配置收敛：噪声、lever arm、初始化路径、GNSS 中断阈值只保留默认主路径和必要 debug 开关。
 3. 周四前做阶段收口清单：README 主贡献一句话、默认输出字段瘦身建议、已知限制和真实数据验证计划。
 ============================================================
+时间：2026-04-28 17:55
+任务：真实数据前置输入质量验收
+阶段：阶段 1 / 最低完整闭环收口
+主线模块：数据读取 / pipeline / metrics
+
+一、本轮目标
+- 接续“用最小真实或半真实 CSV 跑通主入口”，补强 standard_csv 进入 pipeline 前的可初始化性和多源完整性检查。
+- 不做正式实验，不做 batch、manifest、preview 或 CLI 展示整理。
+
+二、修改文件
+- 02_src/eskf_stack/adapters/input_quality.py
+- 05_tests/test_adapters.py
+- 05_tests/test_mainline_acceptance.py
+
+三、完成内容
+1. input quality 新增直接初始化候选统计：
+   - `input_quality_direct_init_candidate_rows`
+   - `input_quality_first_gnss_pos_time_s`
+   - `input_quality_first_direct_init_candidate_time_s`
+2. input quality 新增多源同帧完整性统计：
+   - `input_quality_full_measurement_rows`
+   - `input_quality_full_measurement_coverage_ratio`
+   - `input_quality_first_full_measurement_time_s`
+3. adapter 测试新增半真实 CSV 场景，验证 GNSS 位置、GNSS 速度航向、baro、mag 同帧完整性和首个初始化候选时间。
+4. 最小主线验收改为实际写入临时 standard CSV 并走真实 `standard_csv` loader，再检查 `fusion_output.csv`、`metrics.csv` 和 `dataset_source_summary.txt` 中的输入质量指标。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_adapters 05_tests.test_mainline_acceptance 05_tests.test_metrics 05_tests.test_exporter
+  python -m unittest 05_tests.test_adapters 05_tests.test_mainline_acceptance 05_tests.test_app 05_tests.test_metrics 05_tests.test_measurements 05_tests.test_config 05_tests.test_exporter
+  python -m unittest discover -s 05_tests
+- 结果：
+  通过
+- 关键输出：
+  adapter/acceptance/metrics/exporter：24 项通过
+  主线相关回归：86 项通过
+  全量 unittest：136 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 现在导入真实或半真实 CSV 时，不只知道字段是否存在，还能直接看到数据是否具备初始化候选、多源同帧完整观测、首个 GNSS/初始化候选出现时间。
+- 这让真实数据接入前的问题更容易暴露，避免 pipeline 运行后才发现“数据能读但无法初始化”或“多源覆盖不足”。
+
+七、下一步
+1. 进行默认配置收敛：明确默认主路径、噪声配置、lever arm、初始化兜底和退化阈值哪些进入常规实验，哪些只作为 debug/备用。
+2. 用当前真实数据前置指标检查一组实际日志或样例配置，确认是否能直接初始化、是否有多源覆盖、是否存在时间戳异常。
+3. 周四前做一次阶段收口：主贡献一句话、默认输出瘦身、已知限制、真实数据验证计划。
+============================================================
+时间：2026-04-28 18:05
+任务：默认配置主路径校验
+阶段：阶段 1 / 最低完整闭环收口
+主线模块：config / pipeline guardrail
+
+一、本轮目标
+- 接续默认配置收敛，把会直接破坏真实数据运行的坏配置挡在 `load_config()` 阶段。
+- 不锁死论文参数，只校验维度、正值、阈值顺序和当前项目支持范围。
+
+二、修改文件
+- 02_src/eskf_stack/config.py
+- 05_tests/test_config.py
+
+三、完成内容
+1. 新增 `validate_config()`，在 `load_config()` 返回前统一校验主路径配置。
+2. 校验 process noise、measurement noise、initial covariance 必须为有限正值。
+3. 校验 `gravity` 和 `gnss_lever_arm_body_m` 必须为 3 维有限向量。
+4. 校验初始化阈值、dt guard、NIS adapt/reject 阈值顺序、mode measurement scaling 必须合法。
+5. 校验当前导航坐标系只接受 `ENU`，避免真实数据配置误写后静默进入 pipeline。
+6. 新增 5 个配置负例测试：错误 lever arm 维度、非正测量噪声、NIS 阈值倒置、dt guard 无效、mode scale 非正。
+
+四、验证情况
+- 命令：
+  python -m unittest 05_tests.test_config 05_tests.test_mainline_acceptance 05_tests.test_app
+  python -m unittest discover -s 05_tests
+- 结果：
+  通过
+- 关键输出：
+  config/mainline/app：46 项通过
+  全量 unittest：141 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理 `_tmp_test_app`、`_tmp_test_metrics`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 默认配置现在不是“能解析 JSON 就算可用”，而是会在进入滤波主链前拦截会导致真实数据运行失效的配置错误。
+- 这让后续真实日志调试更安全：噪声、lever arm、NIS 门限、dt 管理和 mode scale 的明显错误会提前暴露。
+
+七、下一步
+1. 用一组实际日志或样例配置跑当前 input quality 和配置校验，确认能否直接初始化、多源覆盖是否足够、时间戳是否异常。
+2. 开始阶段收口：把 README 或项目说明中的主贡献压成一句话，避免论文主线继续发散。
+3. 默认输出字段做瘦身方案，不急着大改，先明确 default/debug 两档边界。
+============================================================
+时间：2026-04-28 18:13
+任务：今日说明文件收尾更新
+阶段：阶段 1 / 最低完整闭环收口
+主线模块：项目说明 / 阶段收口
+
+一、本轮目标
+- 按“今天工作结束”的要求，同步所有正式说明文字，让项目状态从“框架搭建中”更新为“最低完整闭环基本完成，进入真实数据调试和阶段收口”。
+- 不再推进新功能。
+
+二、修改文件
+- 00_说明/README_先看我.txt
+- 00_说明/项目架构说明.txt
+- 00_说明/项目完成度评估.txt
+- 00_说明/项目主线与样例边界.txt
+- 00_说明/运行环境与验收说明.txt
+- 00_说明/运行结果阅读说明.txt
+- 00_说明/统一输入契约.txt
+- 00_说明/数据格式说明.txt
+- 00_说明/后续扩展路线.txt
+- 01_data/配置说明.txt
+
+三、完成内容
+1. 统一说明当前状态：最低完整离线 ESKF 多源融合闭环已经基本搭建完成，但真实数据验证和论文方法收口尚未完成。
+2. 同步今天新增能力说明：GNSS fixed lever arm、input quality 直接初始化候选、多源同帧完整性、配置加载校验、最小主线验收。
+3. 更新验收命令为 `python -m unittest discover -s 05_tests`，并记录当前全量测试 141 项通过。
+4. 更新完成度评估：最低完整系统口径约 85% 到 90%，后续重点转为真实数据调试、配置收敛、输出边界和论文主线聚焦。
+5. 删除或修正过期表述：旧日期、旧测试命令、旧“没有杆臂”说法、旧完成度区间。
+
+四、验证情况
+- 命令：
+  rg -n "2026-04-23|2026-04-27|75% 到 85%|python -m unittest discover 05_tests|没有杆臂" 00_说明 01_data\配置说明.txt
+  python -m unittest discover -s 05_tests
+- 结果：
+  通过
+- 关键输出：
+  过期表述检查无命中
+  全量 unittest：141 项通过
+
+五、结果目录处理
+- 是否生成 03_results_*：
+  否
+- 是否清理：
+  已清理测试生成的 `_tmp_test_app`、`_tmp_test_metrics`；未发现 `03_results_*`
+- 是否保留及原因：
+  保留现有 `03_results`，因为它不是本轮生成的临时目录
+
+六、系统能力提升
+- 今天的代码和说明已经对齐：后续接手时不会再从旧说明误判项目仍停留在框架搭建早期。
+- 文档现在明确了“已搭完最低闭环”和“未完成真实数据验证/论文收口”的边界。
+
+七、下一步
+1. 明天用实际日志或样例配置跑当前 input quality 和配置校验，先判断能否直接初始化、多源覆盖是否足够、时间戳是否异常。
+2. 做 default / debug 输出字段边界方案，先定边界，不急着大删字段。
+3. 把论文主贡献压成一句话，避免后续继续往平台型工程发散。
+============================================================

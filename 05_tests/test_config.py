@@ -15,6 +15,19 @@ from eskf_stack.config import DEFAULT_CONFIG_PATH, load_config
 
 
 class ConfigTests(unittest.TestCase):
+    def _write_payload_config(self, payload: dict, filename: str = "bad_config.json") -> Path:
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        config_path = Path(temp_dir.name) / filename
+        config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return config_path
+
+    def _sample_payload(self) -> dict:
+        payload = json.loads((PROJECT_ROOT / "01_data" / "config.json").read_text(encoding="utf-8"))
+        payload["config_metadata"]["profile"] = "sample_validation"
+        payload["config_metadata"]["name"] = "config validation test"
+        return payload
+
     def test_default_config_uses_default_general_profile(self) -> None:
         config = load_config(PROJECT_ROOT / "01_data" / "config.json")
 
@@ -112,6 +125,49 @@ class ConfigTests(unittest.TestCase):
             config = load_config(config_path)
 
         self.assertEqual(config.gnss_lever_arm_body_m, [0.0, 0.0, 0.0])
+
+    def test_config_validation_rejects_bad_gnss_lever_arm_shape(self) -> None:
+        payload = self._sample_payload()
+        payload["gnss_lever_arm_body_m"] = [0.2, 0.0]
+        config_path = self._write_payload_config(payload)
+
+        with self.assertRaisesRegex(ValueError, "gnss_lever_arm_body_m 必须是 3 维向量"):
+            load_config(config_path)
+
+    def test_config_validation_rejects_non_positive_measurement_noise(self) -> None:
+        payload = self._sample_payload()
+        payload["measurement_noise"]["gnss_pos_std"] = 0.0
+        config_path = self._write_payload_config(payload)
+
+        with self.assertRaisesRegex(ValueError, "measurement_noise.gnss_pos_std 必须大于 0"):
+            load_config(config_path)
+
+    def test_config_validation_rejects_inverted_nis_thresholds(self) -> None:
+        payload = self._sample_payload()
+        payload["innovation_management"]["gnss_pos_nis_adapt_threshold"] = 20.0
+        payload["innovation_management"]["gnss_pos_nis_reject_threshold"] = 10.0
+        config_path = self._write_payload_config(payload)
+
+        with self.assertRaisesRegex(ValueError, "gnss_pos 的 reject threshold 不能小于 adapt threshold"):
+            load_config(config_path)
+
+    def test_config_validation_rejects_invalid_dt_guard(self) -> None:
+        payload = self._sample_payload()
+        payload["time_step_management"]["min_positive_dt_s"] = 0.2
+        payload["time_step_management"]["max_dt_s"] = 0.1
+        config_path = self._write_payload_config(payload)
+
+        with self.assertRaisesRegex(ValueError, "max_dt_s 必须大于 min_positive_dt_s"):
+            load_config(config_path)
+
+    def test_config_validation_rejects_non_positive_mode_scale(self) -> None:
+        payload = self._sample_payload()
+        payload["mode_measurement_scaling"]["enabled"] = True
+        payload["mode_measurement_scaling"]["gnss_pos"]["GNSS_DEGRADED"] = 0.0
+        config_path = self._write_payload_config(payload)
+
+        with self.assertRaisesRegex(ValueError, "mode_measurement_scaling.gnss_pos.GNSS_DEGRADED 必须大于 0"):
+            load_config(config_path)
 
 
 if __name__ == "__main__":

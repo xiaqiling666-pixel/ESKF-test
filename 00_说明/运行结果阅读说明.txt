@@ -4,6 +4,19 @@
 运行项目后，
 `03_results` 或其他结果目录里的文件应该怎么看。
 
+2026-04-28 收口更新
+当前运行结果中新增了几类主线诊断：
+1. input quality 现在能显示：
+   direct init 候选行数、
+   首个 GNSS 位置时间、
+   首个 direct init 候选时间、
+   多源同帧完整观测行数和覆盖率。
+2. GNSS lever arm 诊断已经进入 `fusion_output.csv` 和 metrics。
+3. 配置加载阶段会拦截明显坏配置，
+   因此如果配置本身不合法，pipeline 会在运行前失败。
+4. 最小主线验收已经证明：
+   standard CSV -> pipeline -> export -> metrics 这条链可以跑通。
+
 一、先区分三类输出
 
 当前结果输出主要分成三类：
@@ -131,6 +144,16 @@
 优先检查 adapter 或原始日志，
 不要先去调滤波参数。
 
+当前还建议重点看：
+1. `input_quality_direct_init_candidate_rows`
+   如果为 0，说明当前数据没有同时具备 GNSS 位置和可用 heading 来源。
+2. `input_quality_first_direct_init_candidate_time_s`
+   如果很晚，说明初始化可能会长时间等待。
+3. `input_quality_full_measurement_rows`
+   如果很低，说明四类观测同帧完整性不足。
+4. `input_quality_full_measurement_coverage_ratio`
+   用来判断多源覆盖是否足够支撑多源融合验证。
+
 四、fusion_output.csv 怎么看
 
 这个文件是逐帧记录。
@@ -231,6 +254,15 @@
 - `att_sigma_norm_deg`
 - `covariance_health`
 - `covariance_health_reason`
+
+GNSS lever arm 诊断：
+- `gnss_lever_arm_body_x_m / y_m / z_m`
+- `gnss_lever_arm_nav_x_m / y_m / z_m`
+- `gnss_lever_arm_nav_norm_m`
+- `gnss_lever_arm_rotational_velocity_nav_*`
+- `gnss_lever_arm_rotational_speed_mps`
+
+这些字段用于确认固定杆臂配置是否真的进入主链。
 
 诊断真值：
 - `truth_x / truth_y / truth_z`

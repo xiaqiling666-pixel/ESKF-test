@@ -54,13 +54,50 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(result.source_summary["input_quality_time_non_positive_dt_count"], "1")
             self.assertEqual(result.source_summary["input_quality_core_complete_ratio"], "1.000000")
             self.assertEqual(result.source_summary["input_quality_gnss_pos_coverage_ratio"], "0.000000")
+            self.assertEqual(result.source_summary["input_quality_direct_init_candidate_rows"], "0")
+            self.assertEqual(result.source_summary["input_quality_full_measurement_rows"], "0")
             self.assertEqual(result.source_summary["input_quality_diagnostic_truth_role"], "evaluation_only_not_filter_input")
             self.assertIsNotNone(result.input_quality_metrics)
             self.assertEqual(result.input_quality_metrics["input_quality_row_count"], 2.0)
             self.assertEqual(result.input_quality_metrics["input_quality_time_monotonic_input_order_flag"], 0.0)
+            self.assertEqual(result.input_quality_metrics["input_quality_direct_init_candidate_rows"], 0.0)
+            self.assertEqual(result.input_quality_metrics["input_quality_full_measurement_rows"], 0.0)
             self.assertIn("gnss_x", dataframe.columns)
             self.assertIn("truth_yaw", dataframe.columns)
             self.assertTrue(np.isnan(float(dataframe.loc[0, "gnss_x"])))
+
+    def test_input_quality_reports_direct_initialization_and_full_measurement_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "sample_with_measurements.csv"
+            csv_path.write_text(
+                "\n".join(
+                    [
+                        "time,ax,ay,az,gx,gy,gz,gnss_x,gnss_y,gnss_z,gnss_vx,gnss_vy,gnss_vz,baro_h,mag_yaw",
+                        "0.0,0,0,-9.8,0,0,0,10,20,5,,,,,",
+                        "0.1,0,0,-9.8,0,0,0,10.1,20,5,1,0,0,,",
+                        "0.2,0,0,-9.8,0,0,0,10.2,20,5,1,0,0,5,0",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            config = replace(self.config, dataset_path=str(csv_path))
+
+            result = load_dataset_from_config(config)
+
+            self.assertIsNotNone(result.source_summary)
+            self.assertIsNotNone(result.input_quality_metrics)
+            self.assertEqual(result.source_summary["input_quality_direct_init_candidate_rows"], "2")
+            self.assertEqual(result.source_summary["input_quality_first_gnss_pos_time_s"], "0.000000")
+            self.assertEqual(result.source_summary["input_quality_first_direct_init_candidate_time_s"], "0.100000")
+            self.assertEqual(result.source_summary["input_quality_full_measurement_rows"], "1")
+            self.assertEqual(result.source_summary["input_quality_first_full_measurement_time_s"], "0.200000")
+            self.assertEqual(result.input_quality_metrics["input_quality_direct_init_candidate_rows"], 2.0)
+            self.assertEqual(result.input_quality_metrics["input_quality_full_measurement_rows"], 1.0)
+            self.assertAlmostEqual(
+                result.input_quality_metrics["input_quality_full_measurement_coverage_ratio"],
+                1.0 / 3.0,
+                places=6,
+            )
 
     def test_contract_column_groups_are_split_by_role(self) -> None:
         groups = contract_column_groups()

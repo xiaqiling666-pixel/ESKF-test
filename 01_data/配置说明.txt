@@ -1,5 +1,38 @@
 当前配置分两类
 
+2026-04-28 收口更新
+配置系统已经进入主路径校验阶段。
+`load_config()` 现在不只是解析 JSON，
+还会拦截明显会破坏主链的坏配置。
+
+会被直接拦截的典型错误包括：
+1. `gravity` 不是 3 维向量。
+2. `gnss_lever_arm_body_m` 不是 3 维向量。
+3. process noise、measurement noise、initial covariance 非正或不是有限数值。
+4. `time_step_management.max_dt_s <= min_positive_dt_s`。
+5. NIS reject threshold 小于 adapt threshold。
+6. mode measurement scaling 中存在非正 scale。
+7. 当前不支持的导航坐标系。
+
+这层校验的目的不是锁死参数，
+而是在真实数据调试前拦住明显错误。
+
+当前新增 GNSS 杆臂配置：
+`gnss_lever_arm_body_m`
+
+含义：
+GNSS 天线相对 IMU 坐标系原点的固定杆臂，
+单位 m。
+
+当前作用：
+1. GNSS position update 会补偿天线位置偏移。
+2. GNSS velocity update 会补偿角速度引起的天线转动速度。
+3. lever arm 诊断会进入 `fusion_output.csv` 和 metrics。
+
+注意：
+当前它是固定配置，不是滤波状态。
+如果不知道真实安装偏移，先保持 `[0.0, 0.0, 0.0]`。
+
 1. 通用默认配置
 `config.json`
 
@@ -219,7 +252,7 @@
 说明
 - 这个入口会生成结果目录
 - 日常开发检查仍优先使用：
-  `python -m unittest discover 05_tests`
+  `python -m unittest discover -s 05_tests`
 - 做实验对比时再运行批处理入口
 
 后面建议

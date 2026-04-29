@@ -8,6 +8,18 @@
 结果诊断
 代码很快就会互相缠住。
 
+2026-04-28 收口更新
+当前架构已经从“框架搭建中”推进到“最低完整闭环基本完成”。
+`app.py` 已经进一步收薄，初始化、观测处理、模式上下文、record 构造、lever arm 诊断和结果导出都已外移到 `pipeline` 或 `analysis`。
+
+当前正式主线能力包括：
+1. `core / measurements / adapters / analysis / pipeline / tests` 分层。
+2. MeasurementManager 已向 Gate / Scale / Apply 决策链收敛。
+3. GNSS position / velocity 已支持固定 lever arm 补偿。
+4. adapter 统一入口已能输出输入质量、直接初始化候选和多源同帧完整性指标。
+5. `load_config()` 已能拦截明显坏配置。
+6. 最小主线验收已覆盖 standard CSV -> pipeline -> export -> metrics。
+
 当前架构
 顶层主流程
 `app.py` 仍然是离线流水线入口，

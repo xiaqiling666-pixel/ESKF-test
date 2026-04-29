@@ -102,7 +102,6 @@ class MainlineAcceptanceTests(unittest.TestCase):
 
     def test_minimum_pipeline_exports_fusion_output_metrics_and_lever_arm_diagnostics(self) -> None:
         base_config = load_config(PROJECT_ROOT / "01_data" / "config.json")
-        config = replace(base_config, gnss_lever_arm_body_m=[0.2, 0.0, 0.0])
         sensor_df = _mainline_sensor_df(
             times=[0.0, 0.1, 0.2, 0.3],
             yaw_rate_radps=2.0,
@@ -110,12 +109,11 @@ class MainlineAcceptanceTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             results_root = Path(temp_dir)
+            csv_path = results_root / "acceptance_sensor_log.csv"
+            sensor_df.to_csv(csv_path, index=False)
+            config = replace(base_config, dataset_path=str(csv_path), gnss_lever_arm_body_m=[0.2, 0.0, 0.0])
             with (
                 patch("eskf_stack.app.load_config", return_value=config),
-                patch(
-                    "eskf_stack.app.load_dataset_from_config",
-                    return_value=DatasetLoadResult(dataframe=sensor_df, source_summary={"adapter_kind": "acceptance"}),
-                ),
                 patch("eskf_stack.app.generate_demo_dataset"),
                 patch("eskf_stack.app.ensure_dir", return_value=results_root),
             ):
@@ -125,13 +123,16 @@ class MainlineAcceptanceTests(unittest.TestCase):
             fusion_output_path = metrics_dir / "fusion_output.csv"
             metrics_csv_path = metrics_dir / "metrics.csv"
             metrics_summary_path = metrics_dir / "metrics_summary.txt"
+            source_summary_path = metrics_dir / "dataset_source_summary.txt"
 
             self.assertTrue(fusion_output_path.exists())
             self.assertTrue(metrics_csv_path.exists())
             self.assertTrue(metrics_summary_path.exists())
+            self.assertTrue(source_summary_path.exists())
 
             exported_df = pd.read_csv(fusion_output_path)
             exported_metrics = pd.read_csv(metrics_csv_path).set_index("metric")["value"]
+            source_summary_text = source_summary_path.read_text(encoding="utf-8")
 
             self.assertEqual(len(result_df), 4)
             self.assertEqual(len(exported_df), 4)
@@ -145,8 +146,14 @@ class MainlineAcceptanceTests(unittest.TestCase):
 
             self.assertIn("gnss_pos_updates", exported_metrics.index)
             self.assertIn("gnss_lever_arm_body_norm_m", exported_metrics.index)
+            self.assertIn("input_quality_direct_init_candidate_rows", exported_metrics.index)
+            self.assertIn("input_quality_full_measurement_rows", exported_metrics.index)
             self.assertGreater(float(exported_metrics["gnss_pos_updates"]), 0.0)
             self.assertAlmostEqual(float(exported_metrics["gnss_lever_arm_body_norm_m"]), 0.2, places=6)
+            self.assertEqual(float(exported_metrics["input_quality_direct_init_candidate_rows"]), 4.0)
+            self.assertEqual(float(exported_metrics["input_quality_full_measurement_rows"]), 4.0)
+            self.assertIn("adapter_kind: standard_csv", source_summary_text)
+            self.assertIn("input_quality_first_direct_init_candidate_time_s: 0.000000", source_summary_text)
             self.assertIn("initialization_phase", metrics_summary_path.read_text(encoding="utf-8"))
 
     def test_pipeline_records_gnss_outage_hold_and_recovery_in_acceptance_scenario(self) -> None:
